@@ -1,0 +1,10 @@
+{
+  "/_global-error/page": "/_global-error",
+  "/_not-found/page": "/_not-found",
+  "/api/health/route": "/api/health",
+  "/api/larasaas-demo/announcements/[id]/dismiss/route": "/api/larasaas-demo/announcements/[id]/dismiss",
+  "/api/larasaas-demo/announcements/route": "/api/larasaas-demo/announcements",
+  "/api/presets/route": "/api/presets",
+  "/p/[slug]/page": "/p/[slug]",
+  "/page": "/"
+}
