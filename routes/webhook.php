@@ -18,5 +18,5 @@ use LaraSaaS\Http\Controllers\StripeWebhookController;
 |
 */
 
-Route::post(config('larasaas.route.webhook_path', 'larasaas/webhooks/stripe'), StripeWebhookController::class)
+Route::post(config('larasaas.route.webhook_path', 'larasaas/webhooks/stripe'), [StripeWebhookController::class, 'handleWebhook'])
     ->name(config('larasaas.route.name_prefix', 'larasaas.') . 'webhooks.stripe');
