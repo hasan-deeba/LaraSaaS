@@ -1,0 +1,7 @@
+# JS build artifacts
+node_modules/
+demo/.next/
+demo/.env
+
+# IDE
+.idea/
