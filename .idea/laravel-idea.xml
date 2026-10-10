@@ -6,7 +6,6 @@
     </option>
   </component>
   <component name="LaravelIdeaMainSettings">
-    <option name="frameworkFound" value="true" />
     <option name="laravelBasePath" value="larasaas" />
   </component>
 </project>
