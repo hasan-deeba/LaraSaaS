@@ -3,10 +3,10 @@
   <p align="center"><strong>The drop-in SaaS engine for Laravel + React.</strong></p>
   <p align="center">Stripe billing · dynamic pricing · announcements · feature flags — plugged into <em>your</em> User model, your auth, your theme.</p>
   <p align="center">
-    <a href="https://packagist.org/packages/larasaas/larasaas"><img src="https://img.shields.io/packagist/v/larasaas/larasaas.svg?style=flat-square" alt="Latest Version on Packagist"></a>
-    <a href="https://packagist.org/packages/larasaas/larasaas"><img src="https://img.shields.io/packagist/dt/larasaas/larasaas.svg?style=flat-square" alt="Total Downloads"></a>
-    <a href="https://packagist.org/packages/larasaas/larasaas"><img src="https://img.shields.io/packagist/php-v/larasaas/larasaas.svg?style=flat-square" alt="PHP Version"></a>
-    <a href="https://github.com/larasaas/larasaas/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square" alt="License"></a>
+    <a href="https://packagist.org/packages/hasan-deeba/larasaas"><img src="https://img.shields.io/packagist/v/hasan-deeba/larasaas.svg?style=flat-square" alt="Latest Version on Packagist"></a>
+    <a href="https://packagist.org/packages/hasan-deeba/larasaas"><img src="https://img.shields.io/packagist/dt/hasan-deeba/larasaas.svg?style=flat-square" alt="Total Downloads"></a>
+    <a href="https://packagist.org/packages/hasan-deeba/larasaas"><img src="https://img.shields.io/packagist/php-v/hasan-deeba/larasaas.svg?style=flat-square" alt="PHP Version"></a>
+    <a href="https://github.com/hasan-deeba/LaraSaaS/blob/main/LICENSE"><img src="https://img.shields.io/badge/license-MIT-brightgreen.svg?style=flat-square" alt="License"></a>
   </p>
 </p>
 
@@ -23,16 +23,19 @@ LaraSaaS is a **composer package** (not a fork-the-repo starter kit). It adds ev
 
 ## Requirements
 
-- PHP 8.2+, Laravel 10/11/12
-- An existing auth setup with a React/Inertia frontend — e.g. `laravel new app --breeze --react`
-- Stripe account (test keys are fine)
+- **PHP 8.2+** (8.2–8.5), with the **`bcmath`** extension enabled — it is required by Laravel Cashier's `moneyphp/money` dependency. Verify with `php -m | grep bcmath`; on Debian/Ubuntu install it with `sudo apt install php-bcmath` (see [Troubleshooting](#troubleshooting) if composer complains about it).
+- **Laravel 10, 11 or 12** — Composer picks the matching Cashier automatically (`laravel/cashier` 15.x for Laravel 10/11, 16.x for Laravel 12).
+- An existing auth setup with a **React/Inertia** frontend — e.g. `laravel new app --breeze --react`
+- A **Stripe** account (test keys are fine)
 
 ## Installation
 
 ```bash
-composer require larasaas/larasaas
+composer require hasan-deeba/larasaas:^1.0
 php artisan larasaas:install
 ```
+
+LaraSaaS follows semantic versioning: pin the **major** version in your project (`^1.0` for the 1.x line) instead of `*`, so `composer update` only ever brings you non-breaking minor/patch releases. If you deliberately want the newest `main` build, install with `hasan-deeba/larasaas:@dev`.
 
 The install command publishes the config, migrations, translations and the React components, publishes Cashier's migrations, and (optionally) runs the migrations.
 
@@ -83,6 +86,32 @@ Visit `/app/pricing` — you're a SaaS. The URL prefix, middleware, route names 
 ```
 
 3. Listen to `LaraSaaS\Events\SubscriptionChanged` to react on lifecycle events (seat limits, e-mails, cache warm-up, …).
+
+### Troubleshooting
+
+**`ext-bcmath` missing**
+
+> `moneyphp/money … require ext-bcmath * -> it is missing from your system. Install or enable PHP's bcmath extension.`
+
+Cashier (via its `moneyphp/money` dependency) needs the `bcmath` PHP extension. Enable it for the exact PHP version Composer runs on, then re-run `composer require` / `composer update`:
+
+- **Debian/Ubuntu:** `sudo apt install php-bcmath` (or `php8.x-bcmath` for a pinned version)
+- **RHEL/Fedora/Rocky:** `sudo dnf install php-bcmath`
+- **macOS (Homebrew):** included with the `php` formula
+
+Verify with `php -m | grep bcmath` — and make sure CLI and your web server use the **same** PHP version/extensions. Don't work around it with `--ignore-platform-req=ext-bcmath`: billing math will fatal at runtime.
+
+**PHP 8.5 and `moneyphp/money` version conflicts**
+
+Money v4.8+ supports PHP 8.5. If composer lists "your php version (8.5.x) does not satisfy that requirement" only for old money 4.x releases, the real blocker is usually the missing `bcmath` extension above — enable it first. If a dependency genuinely caps at PHP ≤ 8.4, run the app on PHP 8.2–8.4.
+
+**Cashier/Laravel mismatch**
+
+`laravel/cashier` 15.x requires Laravel 10/11 and 16.x requires Laravel 12. LaraSaaS accepts both, so Composer resolves the right one for your app — if you see an `illuminate/console` conflict, you simply have a Laravel 10/11 app (Cashier 15.x will be picked), nothing to fix.
+
+**Composer only resolves `dev-main`**
+
+Stable versions are published as git tags (e.g. `v1.0.0`). If no version matching your constraint exists yet, check the [releases page](https://github.com/hasan-deeba/LaraSaaS/releases) — or install the dev build with `@dev` until the next tag is pushed.
 
 ## Configuration highlights
 
@@ -178,7 +207,7 @@ import AnnouncementStack from './LaraSaaS/components/AnnouncementStack';
 ```
 
 ```bash
-composer require larasaas/larasaas @dev
+composer require hasan-deeba/larasaas @dev
 ```
 
 ## Repository layout (for contributors)
