@@ -54,6 +54,9 @@ return [
         'cancel'               => 'Cancel subscription',
         'resume'               => 'Resume subscription',
         'canceled'             => 'Subscription canceled — you keep access until the period ends.',
+        'checkout_canceled'    => 'Checkout canceled — no charge was made.',
+        'success'              => 'Your subscription is active. Welcome aboard!',
+        'on_trial'             => 'Trial',
         'cancels_on'           => 'Cancels on :date',
         'ends_on'              => 'Ends on :date',
         'resumed'              => 'Subscription resumed. Welcome back!',
@@ -75,5 +78,10 @@ return [
         'unavailable' => 'This feature is not available for your account yet.',
         'activated'   => 'Flag :flag activated.',
         'deactivated' => 'Flag :flag deactivated.',
+    ],
+
+    'embed' => [
+        'not_authenticated' => 'This embed link is missing or expired. Ask the host application to generate a fresh one with LaraSaaS::embedUrl().',
+        'powered_by'        => 'Secured by :app',
     ],
 ];
