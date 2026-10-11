@@ -2,6 +2,20 @@
 
 All notable changes to `larasaas/larasaas` will be documented in this file.
 
+## 1.1.0 — Unreleased
+
+### Added
+
+- **Integration modes** — choose how your frontend consumes LaraSaaS via `integration.mode` / `LARASAAS_INTEGRATION_MODE` (switchable at any time):
+  - `inertia` (default) — Laravel + React in the same project; the existing drop-in experience.
+  - `api` — headless JSON surface for React SPAs on other servers, Flutter / iOS / Android apps: the full pricing matrix, subscription state, invoices, subscribe/swap/cancel/resume and the Stripe portal URL. Design your own tables & pricing UI on the client.
+  - `embed` — standalone, self-contained pricing/billing pages (no Node/Vite build) for `<iframe>` / mobile WebView embedding, authenticated through signed expiring URLs (`LaraSaaS::embedUrl()`), with configurable CSP `frame-ancestors`.
+  - `all` — every surface at once; `custom` — only the Stripe webhook, build your own on the `LaraSaaS` manager.
+- New headless API endpoints under `/api/larasaas`: `GET /pricing`, `GET /invoices`, `POST /billing/subscribe/{plan}`, `POST /billing/swap/{plan}`, `POST /billing/cancel`, `POST /billing/resume`, `POST /billing/portal`. All headless responses use a `{"data": …}` envelope (`{"url": …}` for checkout/portal); `GET /subscription` now lives on the headless controller and follows the same envelope.
+- Optional CORS support for browser SPAs (`integration.api.cors_origins`).
+- `larasaas:install` now asks for the integration mode (`--mode=`), writes `LARASAAS_INTEGRATION_MODE` to `.env`, and only publishes React components when they are needed.
+- Shared `LaraSaaS\Support\BillingActions` used by every surface; `LaraSaaS::integrationMode()`, `servesInertia()`, `servesApi()`, `servesEmbed()`, `embedUrl()` on the manager/facade.
+
 ## 1.0.0 — Initial release
 
 ### Added

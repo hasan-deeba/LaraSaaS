@@ -28,12 +28,14 @@ class EnsureSubscribed
         $name = $larasaas->subscriptionName();
 
         if (! $billable->subscribed($name)) {
-            if ($request->expectsJson()) {
+            $pricingRoute = $larasaas->routeName('pricing');
+
+            if ($request->expectsJson() || ! $larasaas->servesInertia() || ! \Illuminate\Support\Facades\Route::has($pricingRoute)) {
                 abort(402, __('larasaas::larasaas.billing.subscription_required'));
             }
 
             return redirect()
-                ->route($larasaas->routeName('pricing'))
+                ->route($pricingRoute)
                 ->with('larasaas.notice', __('larasaas::larasaas.billing.subscription_required'));
         }
 

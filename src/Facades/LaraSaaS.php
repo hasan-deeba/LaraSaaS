@@ -22,6 +22,12 @@ use Illuminate\Support\Facades\Facade;
  * @method static string routeName(string $name)
  * @method static string apiBase()
  * @method static string accentColor()
+ * @method static string integrationMode()
+ * @method static bool servesInertia()
+ * @method static bool servesApi()
+ * @method static bool servesEmbed()
+ * @method static string embedRouteName(string $page)
+ * @method static string embedUrl($user, string $page = 'pricing', array $params = [], ?int $minutes = null)
  *
  * @see \LaraSaaS\LaraSaaS
  */

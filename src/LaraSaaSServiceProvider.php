@@ -34,27 +34,74 @@ class LaraSaaSServiceProvider extends ServiceProvider
 
     protected function registerRoutes(): void
     {
-        // Web UI — Inertia pages, checkout redirects, billing portal.
-        Route::group([
-            'domain'     => config('larasaas.route.domain'),
-            'prefix'     => config('larasaas.route.prefix', 'app'),
-            'middleware' => config('larasaas.route.middleware', ['web', 'auth']),
-            'as'         => config('larasaas.route.name_prefix', 'larasaas.'),
-        ], function () {
-            $this->loadRoutesFrom(__DIR__ . '/../routes/web.php');
-        });
+        /** @var LaraSaaS $larasaas */
+        $larasaas = $this->app->make(LaraSaaS::class);
 
-        // JSON API consumed by the React components.
-        Route::group([
-            'domain'     => config('larasaas.route.domain'),
-            'prefix'     => config('larasaas.route.api_prefix', 'api/larasaas'),
-            'middleware' => config('larasaas.route.api_middleware', ['web', 'auth']),
-            'as'         => config('larasaas.route.name_prefix', 'larasaas.') . 'api.',
-        ], function () {
-            $this->loadRoutesFrom(__DIR__ . '/../routes/api.php');
-        });
+        // Web UI — Inertia pages, checkout redirects, billing portal.
+        // (integration.mode: inertia | all)
+        if ($larasaas->servesInertia()) {
+            Route::group([
+                'domain'     => config('larasaas.route.domain'),
+                'prefix'     => config('larasaas.route.prefix', 'app'),
+                'middleware' => config('larasaas.route.middleware', ['web', 'auth']),
+                'as'         => config('larasaas.route.name_prefix', 'larasaas.'),
+            ], function () {
+                $this->loadRoutesFrom(__DIR__ . '/../routes/web.php');
+            });
+        }
+
+        // JSON API — consumed by the shipped React components and by any
+        // headless client (separate SPA, Flutter, native).
+        // (integration.mode: inertia | api | embed | all)
+        if ($larasaas->servesApi()) {
+            $middleware = config('larasaas.route.api_middleware', ['web', 'auth']);
+
+            if (config('larasaas.integration.api.cors_origins')) {
+                array_unshift($middleware, \LaraSaaS\Http\Middleware\ApiCors::class);
+            }
+
+            Route::group([
+                'domain'     => config('larasaas.route.domain'),
+                'prefix'     => config('larasaas.route.api_prefix', 'api/larasaas'),
+                'middleware' => $middleware,
+                'as'         => config('larasaas.route.name_prefix', 'larasaas.') . 'api.',
+            ], function () {
+                $this->loadRoutesFrom(__DIR__ . '/../routes/api.php');
+
+                // CORS preflights (OPTIONS) must match a route to reach the
+                // ApiCors middleware; answer them here.
+                Route::options('/{path}', fn () => response('', 204))->where('path', '.*');
+            });
+        }
+
+        // Embed UI — standalone pages for <iframe> / mobile WebView.
+        // (integration.mode: embed | all)
+        if ($larasaas->servesEmbed()) {
+            $embedMiddleware = config('larasaas.route.embed_middleware', [
+                \Illuminate\Cookie\Middleware\EncryptCookies::class,
+                \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+                \Illuminate\Session\Middleware\StartSession::class,
+                \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+                \Illuminate\Routing\Middleware\SubstituteBindings::class,
+            ]);
+
+            $embedMiddleware = array_merge($embedMiddleware, [
+                \LaraSaaS\Http\Middleware\AuthenticatesEmbedUser::class,
+                \LaraSaaS\Http\Middleware\EmbedFrameHeaders::class,
+            ]);
+
+            Route::group([
+                'domain'     => config('larasaas.route.domain'),
+                'prefix'     => config('larasaas.route.embed_prefix', 'embed'),
+                'middleware' => $embedMiddleware,
+                'as'         => config('larasaas.route.name_prefix', 'larasaas.') . 'embed.',
+            ], function () {
+                $this->loadRoutesFrom(__DIR__ . '/../routes/embed.php');
+            });
+        }
 
         // Stripe webhook — public, signature verified by Cashier middleware.
+        // Always registered, whatever the integration mode.
         Route::group(['middleware' => ['api']], function () {
             $this->loadRoutesFrom(__DIR__ . '/../routes/webhook.php');
         });

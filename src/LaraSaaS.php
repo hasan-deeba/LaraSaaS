@@ -6,6 +6,7 @@ use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
+use Illuminate\Support\Facades\URL;
 
 /**
  * The central LaraSaaS manager — resolves the host application's models,
@@ -189,6 +190,65 @@ class LaraSaaS
     public function announcementType(string $type): array
     {
         return $this->announcementTypes()[$type] ?? ['color' => '#3b82f6', 'icon' => 'info'];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Integration mode
+    |--------------------------------------------------------------------------
+    */
+
+    /** The configured integration mode: inertia | api | embed | all | custom. */
+    public function integrationMode(): string
+    {
+        $mode = config('larasaas.integration.mode', 'inertia');
+
+        return in_array($mode, ['inertia', 'api', 'embed', 'all', 'custom'], true) ? $mode : 'inertia';
+    }
+
+    /** Laravel + React/Inertia in the same project (the published pages). */
+    public function servesInertia(): bool
+    {
+        return in_array($this->integrationMode(), ['inertia', 'all'], true);
+    }
+
+    /** JSON API for headless clients (separate SPA, Flutter, native…). */
+    public function servesApi(): bool
+    {
+        return $this->integrationMode() !== 'custom';
+    }
+
+    /** Standalone embeddable pages for <iframe> / mobile WebView. */
+    public function servesEmbed(): bool
+    {
+        return in_array($this->integrationMode(), ['embed', 'all'], true);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Embed surface (iframe / WebView)
+    |--------------------------------------------------------------------------
+    */
+
+    public function embedRouteName(string $page): string
+    {
+        return $this->routeName('embed.') . $page;
+    }
+
+    /**
+     * Signed, expiring URL for one of the embed pages ("pricing" | "billing"),
+     * already authenticated for the given user — no shared session required.
+     * Hand this URL to your <iframe> / WebView and LaraSaaS does the rest.
+     */
+    public function embedUrl($user, string $page = 'pricing', array $params = [], ?int $minutes = null): string
+    {
+        $ttl = $minutes ?? (int) config('larasaas.integration.embed.token_ttl', 60);
+
+        return URL::temporarySignedRoute(
+            $this->embedRouteName($page),
+            now()->addMinutes(max(1, $ttl)),
+            array_merge(['user' => $user->getAuthIdentifier()], $params),
+        );
     }
 
     /*

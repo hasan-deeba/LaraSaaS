@@ -30,13 +30,78 @@ return [
 
     'route' => [
         'domain'           => env('LARASAAS_DOMAIN'),                  // e.g. billing.yourapp.test
-        'prefix'           => env('LARASAAS_PREFIX', 'app'),           // web UI  → /app/pricing
+        'prefix'           => env('LARASAAS_PREFIX', 'app'),           // web UI   → /app/pricing
         'api_prefix'       => env('LARASAAS_API_PREFIX', 'api/larasaas'),
+        'embed_prefix'     => env('LARASAAS_EMBED_PREFIX', 'embed'),   // embed UI → /embed/pricing
         'webhook_path'     => env('LARASAAS_WEBHOOK_PATH', 'larasaas/webhooks/stripe'),
         'name_prefix'      => 'larasaas.',
         'middleware'       => ['web', 'auth'],
         'api_middleware'   => ['web', 'auth'],
         'admin_middleware' => ['web', 'auth', 'can:larasaas-admin'],
+
+        // The embed surface is deliberately stateless-ish: it authenticates
+        // through signed URLs (see `LaraSaaS::embedUrl()`), so it skips CSRF
+        // verification while still giving you cookies/session when the embed
+        // is served first-party. Override freely if your host needs otherwise.
+        'embed_middleware' => [
+            \Illuminate\Cookie\Middleware\EncryptCookies::class,
+            \Illuminate\Cookie\Middleware\AddQueuedCookiesToResponse::class,
+            \Illuminate\Session\Middleware\StartSession::class,
+            \Illuminate\View\Middleware\ShareErrorsFromSession::class,
+            \Illuminate\Routing\Middleware\SubstituteBindings::class,
+        ],
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Integration Mode — how your frontend consumes LaraSaaS
+    |--------------------------------------------------------------------------
+    |
+    | Pick the surface that matches your architecture (or "all" while
+    | migrating). The mode decides which routes the package registers —
+    | change it here or via the LARASAAS_INTEGRATION_MODE env variable,
+    | any time, without touching code:
+    |
+    |  • inertia — Laravel + React in the SAME project (the default).
+    |    Publish the React pages/components and use them directly.
+    |
+    |  • api     — headless. Your client lives elsewhere: a React SPA on
+    |    another server, Flutter / iOS / Android… Only the JSON API (and the
+    |    Stripe webhook) is registered. You design your own tables & pricing
+    |    UI and drive them from the API.
+    |
+    |  • embed   — same multi-server setup, but you'd rather not rebuild the
+    |    UI: the package serves standalone pricing/billing pages you drop in
+    |    with an <iframe> (or a mobile WebView). Signed URLs authenticate the
+    |    visitor without sharing sessions across servers.
+    |
+    |  • all     — every surface at once (inertia + api + embed).
+    |
+    |  • custom  — register nothing but the Stripe webhook. Build your own
+    |    routes/pages on top of the LaraSaaS manager (or the `LaraSaaS`
+    |    facade) — the "choose your own way" escape hatch.
+    |
+    */
+
+    'integration' => [
+        'mode' => env('LARASAAS_INTEGRATION_MODE', 'inertia'), // inertia | api | embed | all | custom
+
+        'api' => [
+            // Browser SPAs on other origins need CORS. List the exact origins
+            // (e.g. "https://app.example.com,https://admin.example.com") or "*".
+            // Leave empty when clients don't run in a browser (Flutter, native,
+            // server-side) or when the SPA shares your origin.
+            'cors_origins' => array_filter(array_map('trim', explode(',', (string) env('LARASAAS_API_CORS_ORIGINS', '')))),
+        ],
+
+        'embed' => [
+            // Who may frame the embed pages — sent as CSP `frame-ancestors`.
+            // "*" (default) or a comma-separated list of parent origins.
+            'frame_ancestors' => array_filter(array_map('trim', explode(',', (string) env('LARASAAS_EMBED_FRAME_ANCESTORS', '*')))),
+
+            // Lifetime (minutes) of the signed embed URLs from `LaraSaaS::embedUrl()`.
+            'token_ttl' => (int) env('LARASAAS_EMBED_TOKEN_TTL', 60),
+        ],
     ],
 
     /*

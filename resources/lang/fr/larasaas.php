@@ -54,6 +54,9 @@ return [
         'cancel'               => 'Résilier l’abonnement',
         'resume'               => 'Réactiver l’abonnement',
         'canceled'             => 'Abonnement résilié — l’accès reste actif jusqu’à la fin de la période.',
+        'checkout_canceled'    => 'Paiement annulé — aucun débit n’a été effectué.',
+        'success'              => 'Votre abonnement est actif. Bienvenue !',
+        'on_trial'             => 'Essai',
         'cancels_on'           => 'Résiliation le :date',
         'ends_on'              => 'Se termine le :date',
         'resumed'              => 'Abonnement réactivé. Bon retour !',
@@ -75,5 +78,10 @@ return [
         'unavailable' => 'Cette fonctionnalité n’est pas encore disponible pour votre compte.',
         'activated'   => 'Fonctionnalité :flag activée.',
         'deactivated' => 'Fonctionnalité :flag désactivée.',
+    ],
+
+    'embed' => [
+        'not_authenticated' => 'Ce lien d’intégration est absent ou expiré. Demandez à l’application hôte d’en générer un nouveau via LaraSaaS::embedUrl().',
+        'powered_by'        => 'Sécurisé par :app',
     ],
 ];
