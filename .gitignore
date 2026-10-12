@@ -5,3 +5,9 @@ demo/.env
 
 # IDE
 .idea/
+
+# PHP dependencies and test cache
+/vendor/
+/composer.lock
+/.phpunit.cache/
+/.phpunit.result.cache

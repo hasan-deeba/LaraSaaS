@@ -7,6 +7,8 @@ use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
 use Illuminate\Support\Arr;
 use Illuminate\Support\Facades\URL;
+use Laravel\Cashier\Billable;
+use LogicException;
 
 /**
  * The central LaraSaaS manager — resolves the host application's models,
@@ -70,15 +72,30 @@ class LaraSaaS
             $resolver = config('larasaas.billing.workspace_resolver');
 
             if (is_callable($resolver)) {
-                return $resolver($user);
+                return $this->ensureBillable($resolver($user));
             }
 
             if (method_exists($user, 'currentWorkspace')) {
-                return $user->currentWorkspace();
+                return $this->ensureBillable($user->currentWorkspace());
             }
         }
 
-        return $user;
+        return $this->ensureBillable($user);
+    }
+
+    /** Cashier's billing methods come from a trait, not a model interface. */
+    protected function ensureBillable(?Model $model): ?Model
+    {
+        if ($model !== null && ! in_array(Billable::class, class_uses_recursive($model), true)) {
+            throw new LogicException(sprintf(
+                'LaraSaaS billing requires the [%s] model to use the Laravel\\Cashier\\Billable trait. '
+                . 'Add it to your user model, or to the workspace model when billing.billable is workspace. '
+                . 'See the README Cashier setup instructions.',
+                $model::class,
+            ));
+        }
+
+        return $model;
     }
 
     public function billableType(): string
