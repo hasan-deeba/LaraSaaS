@@ -30,7 +30,7 @@ jobs:
             pest: '^3.0'
     name: Laravel ${{ matrix.laravel }} / Cashier ${{ matrix.cashier }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
       - uses: shivammathur/setup-php@v2
         with:
           php-version: '8.2'
@@ -42,8 +42,20 @@ jobs:
           composer require --no-update "illuminate/support:${{ matrix.laravel }}" "laravel/cashier:${{ matrix.cashier }}"
           composer require --dev --no-update "orchestra/testbench:${{ matrix.testbench }}" "pestphp/pest:${{ matrix.pest }}"
           composer config allow-plugins.pestphp/pest-plugin true
+          # Compatibility tests only: old Laravel majors have known advisories.
+          # Keep them visible in audits; do not change consumer security policy.
+          composer config --json policy.advisories.ignore '{"laravel/framework":{"constraint":"<12.0","reason":"Isolated legacy compatibility tests only","on-audit":false}}'
           composer update --prefer-dist --no-interaction
       - name: Lint PHP
         run: find src config routes database tests -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Regression tests
-        run: vendor/bin/phpunit
+        run: |
+          if ! vendor/bin/pest --colors=never > test-results.txt 2>&1; then
+            cat test-results.txt
+            while IFS= read -r line; do
+              line="${line//'%'/'%25'}"
+              printf '::error::%s\n' "$line"
+            done < test-results.txt
+            exit 1
+          fi
+          cat test-results.txt
