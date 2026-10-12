@@ -193,6 +193,50 @@ LaraSaaS follows semantic versioning: pin the **major** version in your project 
 
 The install command asks for your [integration mode](#which-integration-is-right-for-you) and writes it to `.env` as `LARASAAS_INTEGRATION_MODE`, then publishes the config, migrations and translations (plus the React components in `inertia`/`all` mode), publishes Cashier's migrations, and (optionally) runs the migrations.
 
+### Cashier setup
+
+**Required in every integration mode:** add Cashier's `Billable` trait to the
+model that owns subscriptions. Installing Cashier or publishing its migrations
+does **not** add this trait to your application's models automatically.
+For the default user billing:
+
+```php
+namespace App\Models;
+
+use Illuminate\Foundation\Auth\User as Authenticatable;
+use Laravel\Cashier\Billable;
+
+class User extends Authenticatable
+{
+    use Billable; // Keep your existing traits and model configuration too.
+}
+```
+
+If `billing.billable` is `workspace`, add the trait to your **workspace model**
+instead and configure `billing.workspace_model` and `billing.workspace_resolver`.
+The resolved model must use `Billable` (inherited/nested usage is supported).
+For a custom user model or workspace billing, also register the same model with
+Cashier in your application's `AppServiceProvider::boot()` so webhooks resolve
+the correct customers:
+
+```php
+\Laravel\Cashier\Cashier::useCustomerModel(\App\Models\Workspace::class);
+// For custom user billing, use your configured user model class instead.
+```
+
+Make sure Cashier's customer columns (`stripe_id`, `pm_type`, `pm_last_four`,
+`trial_ends_at`) exist on the billable model's table and its subscription
+migrations reference the correct billable model. Adapt the published Cashier
+migrations before running them for workspace/custom-table billing; do not run
+duplicate migrations on an existing installation.
+
+Without the trait, calls such as `subscription()` and `subscribed()` cannot
+work. LaraSaaS now reports a setup error identifying the model rather than an
+undefined-method error. The installer reminds you of this step but never edits
+your model files.
+
+### Stripe credentials
+
 Add your Stripe credentials to `.env`:
 
 ```env

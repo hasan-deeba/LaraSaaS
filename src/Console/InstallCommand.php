@@ -79,8 +79,10 @@ class InstallCommand extends Command
         $this->line('  2. Set plan price ids in <comment>config/larasaas.php</comment> (or .env STRIPE_PRICE_*)');
         $this->line('  3. Point Stripe webhooks at <comment>/larasaas/webhooks/stripe</comment> and exclude it from CSRF');
 
+        $this->line('  4. Add <comment>Laravel\\Cashier\\Billable</comment> to your billable model (user, or workspace for workspace billing; see README Cashier setup)');
+
         foreach ($this->nextSteps($mode) as $i => $step) {
-            $this->line('  ' . ($i + 4) . ". {$step}");
+            $this->line('  ' . ($i + 5) . ". {$step}");
         }
 
         return self::SUCCESS;

@@ -112,6 +112,7 @@ return [
     | `billable` decides where subscriptions live: "user" attaches them to
     | the User model; "workspace" resolves a team/workspace through the
     | resolver below, so each workspace gets its own subscription & portal.
+    | The resolved model MUST use Laravel\Cashier\Billable (see README).
     |
     */
 

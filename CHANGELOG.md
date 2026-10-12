@@ -1,8 +1,8 @@
 # Changelog
 
-All notable changes to `larasaas/larasaas` will be documented in this file.
+All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
-## 1.1.0 — Unreleased
+## 1.1.0 — 2026-10-13
 
 ### Added
 
@@ -15,6 +15,11 @@ All notable changes to `larasaas/larasaas` will be documented in this file.
 - Optional CORS support for browser SPAs (`integration.api.cors_origins`).
 - `larasaas:install` now asks for the integration mode (`--mode=`), writes `LARASAAS_INTEGRATION_MODE` to `.env`, and only publishes React components when they are needed.
 - Shared `LaraSaaS\Support\BillingActions` used by every surface; `LaraSaaS::integrationMode()`, `servesInertia()`, `servesApi()`, `servesEmbed()`, `embedUrl()` on the manager/facade.
+
+### Fixed
+
+- Require Cashier's `Laravel\Cashier\Billable` trait on the resolved billing model with an actionable setup error instead of undefined billing-method errors. Supports inherited/nested traits and both user and workspace billing.
+- Document the required trait, custom Cashier customer-model registration and migration setup; remind users during installation without modifying host model files.
 
 ## 1.0.0 — Initial release
 

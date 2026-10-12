@@ -1,0 +1,64 @@
+name: Tests
+
+on:
+  push:
+    branches: [main, 'arena/**']
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  billing:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - laravel: '10.*'
+            testbench: '^8.0'
+            cashier: '^15.0'
+            pest: '^2.0'
+          - laravel: '11.*'
+            testbench: '^9.0'
+            cashier: '^15.0'
+            pest: '^3.0'
+          - laravel: '12.*'
+            testbench: '^10.0'
+            cashier: '^16.0'
+            pest: '^3.0'
+    name: Laravel ${{ matrix.laravel }} / Cashier ${{ matrix.cashier }}
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: bcmath, mbstring, pdo_sqlite
+          coverage: none
+          tools: composer:v2
+      - name: Install dependencies
+        run: |
+          composer require --no-update "illuminate/support:${{ matrix.laravel }}" "laravel/cashier:${{ matrix.cashier }}"
+          composer require --dev --no-update "orchestra/testbench:${{ matrix.testbench }}" "pestphp/pest:${{ matrix.pest }}"
+          composer config allow-plugins.pestphp/pest-plugin true
+          # Compatibility tests only: old Laravel majors have known advisories.
+          # Keep them visible in audits; do not change consumer security policy.
+          if [ '${{ matrix.laravel }}' != '12.*' ]; then
+            composer config policy.advisories.block false
+          fi
+          composer update --prefer-dist --no-interaction
+      - name: Lint PHP
+        run: find src config routes database tests -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Regression tests
+        run: |
+          if ! vendor/bin/pest --colors=never > test-results.txt 2>&1; then
+            cat test-results.txt
+            message="$(cat test-results.txt)"
+            message="${message//'%'/'%25'}"
+            message="${message//$'\n'/'%0A'}"
+            message="${message//$'\r'/'%0D'}"
+            printf '::error::%s\n' "$message"
+            exit 1
+          fi
+          cat test-results.txt
