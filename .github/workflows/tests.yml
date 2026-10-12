@@ -44,7 +44,9 @@ jobs:
           composer config allow-plugins.pestphp/pest-plugin true
           # Compatibility tests only: old Laravel majors have known advisories.
           # Keep them visible in audits; do not change consumer security policy.
-          composer config --json policy.advisories.ignore '{"laravel/framework":{"constraint":"<12.0","reason":"Isolated legacy compatibility tests only","on-audit":false}}'
+          if [ '${{ matrix.laravel }}' != '12.*' ]; then
+            composer config policy.advisories.block false
+          fi
           composer update --prefer-dist --no-interaction
       - name: Lint PHP
         run: find src config routes database tests -name '*.php' -print0 | xargs -0 -n1 php -l
@@ -52,10 +54,11 @@ jobs:
         run: |
           if ! vendor/bin/pest --colors=never > test-results.txt 2>&1; then
             cat test-results.txt
-            while IFS= read -r line; do
-              line="${line//'%'/'%25'}"
-              printf '::error::%s\n' "$line"
-            done < test-results.txt
+            message="$(cat test-results.txt)"
+            message="${message//'%'/'%25'}"
+            message="${message//$'\n'/'%0A'}"
+            message="${message//$'\r'/'%0D'}"
+            printf '::error::%s\n' "$message"
             exit 1
           fi
           cat test-results.txt
