@@ -16,6 +16,7 @@ class PlansTest extends TestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
+        $app['config']->set('app.key', 'base64:' . base64_encode(str_repeat('a', 32)));
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
         $app['config']->set('larasaas.integration.mode', 'all');
