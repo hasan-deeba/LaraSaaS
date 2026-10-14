@@ -29,6 +29,9 @@ class ShareLaraSaaSProps
                 'accent'       => $larasaas->accentColor(),
                 'api_base'     => $larasaas->apiBase(),
                 'poll_seconds' => config('larasaas.announcements.poll_seconds', 60),
+                'authenticated' => $user !== null,
+                'login_url' => config('larasaas.login_url', '/login'),
+                'web_base' => '/' . trim(config('larasaas.route.prefix', 'app'), '/'),
                 'is_admin'     => $user ? $larasaas->isAdmin($user) : false,
                 'features'     => $this->flagsFor($user),
             ];
@@ -40,6 +43,9 @@ class ShareLaraSaaSProps
     protected function flagsFor($user): array
     {
         $flags = [];
+        if (! $user) {
+            return $flags;
+        }
 
         foreach (app(LaraSaaS::class)->featureDefinitions() as $name => $definition) {
             $flags[$name] = Feature::for($user)->active($name);

@@ -170,7 +170,9 @@
         @if (! empty($nav))
             <nav class="ls-nav">
                 <a href="{{ $nav['pricing'] ?? '#' }}" class="{{ request()->routeIs('larasaas.embed.pricing') ? 'is-active' : '' }}">{{ __('larasaas::larasaas.pricing.title') }}</a>
+                @if (! empty($nav['billing']))
                 <a href="{{ $nav['billing'] ?? '#' }}" class="{{ request()->routeIs('larasaas.embed.billing') ? 'is-active' : '' }}">{{ __('larasaas::larasaas.billing.title') }}</a>
+                @endif
             </nav>
         @endif
     </header>

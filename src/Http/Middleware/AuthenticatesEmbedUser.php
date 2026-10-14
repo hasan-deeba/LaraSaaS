@@ -23,12 +23,20 @@ use Symfony\Component\HttpFoundation\Response;
  */
 class AuthenticatesEmbedUser
 {
-    public function handle(Request $request, Closure $next): Response
+    public function handle(Request $request, Closure $next, string $mode = 'required'): Response
     {
         /** @var LaraSaaS $larasaas */
         $larasaas = app(LaraSaaS::class);
 
-        $hasUserParam = $request->query->has('user') || $request->request->has('user');
+        // Identity must be in the signed query, never an unsigned POST body.
+        abort_if($request->request->has('user'), 403);
+        $hasUserParam = $request->query->has('user');
+        // Embed POSTs skip CSRF, so they MUST carry a signed user URL even
+        // for session users. All rendered forms generate such URLs.
+        abort_if(! $request->isMethodSafe() && ! $hasUserParam, 403);
+        if ($request->query->has('signature') || $request->query->has('expires')) {
+            abort_unless(URL::hasValidSignature($request) || URL::hasValidSignature($request, absolute: false), 403);
+        }
 
         if ($hasUserParam) {
             // A `user` parameter claims identity — only trust it when signed.
@@ -37,13 +45,13 @@ class AuthenticatesEmbedUser
 
             abort_unless($signed, 403, __('larasaas::larasaas.embed.not_authenticated'));
 
-            $user = $larasaas->usersQuery()->find($request->query('user') ?? $request->input('user'));
+            $user = $larasaas->usersQuery()->find($request->query('user'));
 
             abort_unless($user !== null, 403, __('larasaas::larasaas.embed.not_authenticated'));
         } else {
             $user = $request->user();
 
-            abort_unless($user !== null, 403, __('larasaas::larasaas.embed.not_authenticated'));
+            abort_unless($user !== null || ($mode === 'optional' && $request->isMethod('GET')), 403, __('larasaas::larasaas.embed.not_authenticated'));
         }
 
         $request->setUserResolver(fn () => $user);

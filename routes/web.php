@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use LaraSaaS\Http\Controllers\Admin\AnnouncementAdminController;
+use LaraSaaS\Http\Controllers\Admin\PlanAdminController;
 use LaraSaaS\Http\Controllers\Admin\FeatureFlagAdminController;
 use LaraSaaS\Http\Controllers\BillingController;
 use LaraSaaS\Http\Controllers\DashboardController;
@@ -21,7 +22,6 @@ Route::middleware([ShareLaraSaaSProps::class])->group(function () {
 
     Route::get('/dashboard', DashboardController::class)->name('dashboard');
 
-    Route::get('/pricing', [BillingController::class, 'pricing'])->name('pricing');
 
     Route::get('/billing', [BillingController::class, 'index'])->name('billing.index');
     Route::post('/billing/subscribe/{plan}', [BillingController::class, 'subscribe'])->name('billing.subscribe');
@@ -37,6 +37,11 @@ Route::middleware([ShareLaraSaaSProps::class])->group(function () {
     */
     Route::middleware(config('larasaas.route.admin_middleware', ['web', 'auth', 'can:larasaas-admin']))
         ->prefix('admin')->as('admin.')->group(function () {
+
+            Route::get('/plans', [PlanAdminController::class, 'index'])->name('plans.index');
+            Route::post('/plans', [PlanAdminController::class, 'store'])->name('plans.store');
+            Route::put('/plans/{plan}', [PlanAdminController::class, 'update'])->name('plans.update');
+            Route::delete('/plans/{plan}', [PlanAdminController::class, 'destroy'])->name('plans.destroy');
 
             Route::get('/announcements', [AnnouncementAdminController::class, 'index'])->name('announcements.index');
             Route::post('/announcements', [AnnouncementAdminController::class, 'store'])->name('announcements.store');

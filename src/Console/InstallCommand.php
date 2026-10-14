@@ -49,7 +49,7 @@ class InstallCommand extends Command
 
         $force = $this->option('force') ? ['--force' => true] : [];
 
-        $tags = ['larasaas-config', 'larasaas-migrations', 'larasaas-lang'];
+        $tags = ['larasaas-config', 'larasaas-lang'];
 
         // The React/Inertia surface is only needed when the host serves it.
         if (in_array($mode, ['inertia', 'all'], true)) {
@@ -61,22 +61,26 @@ class InstallCommand extends Command
             $this->components->twoColumnDetail("Published [{$tag}]", '<fg=green>DONE</>');
         }
 
+        $this->publishMigrations();
+
         // Cashier needs its migrations in the host app.
         if (class_exists(\Laravel\Cashier\Cashier::class)) {
-            $this->callSilently('vendor:publish', ['--tag' => 'cashier-migrations', ...$force]);
+            $this->callSilently('vendor:publish', ['--tag' => 'cashier-migrations']);
             $this->components->twoColumnDetail('Published [cashier-migrations]', '<fg=green>DONE</>');
         }
 
         $this->writeEnvMode($mode);
 
         if ($this->option('migrate') || $this->components->confirm('Run the migrations now?', true)) {
-            $this->call('migrate');
+            if ($this->call('migrate') !== self::SUCCESS) {
+                return self::FAILURE;
+            }
         }
 
         $this->newLine();
         $this->components->info('LaraSaaS is ready. Next steps:');
         $this->line('  1. Add your Stripe keys to .env: <comment>STRIPE_KEY, STRIPE_SECRET, STRIPE_WEBHOOK_SECRET</comment>');
-        $this->line('  2. Set plan price ids in <comment>config/larasaas.php</comment> (or .env STRIPE_PRICE_*)');
+        $this->line('  2. Define <comment>plan_features</comment> in config, then create plans at <comment>/app/admin/plans</comment> (Inertia/all mode)');
         $this->line('  3. Point Stripe webhooks at <comment>/larasaas/webhooks/stripe</comment> and exclude it from CSRF');
 
         $this->line('  4. Add <comment>Laravel\\Cashier\\Billable</comment> to your billable model (user, or workspace for workspace billing; see README Cashier setup)');
@@ -86,6 +90,32 @@ class InstallCommand extends Command
         }
 
         return self::SUCCESS;
+    }
+
+    protected function publishMigrations(): void
+    {
+        $directory = database_path('migrations');
+        $baseline = '2026_10_14_000000_create_larasaas_schema.php';
+        if (is_file($directory . '/' . $baseline)) {
+            $this->components->info('LaraSaaS schema migration already published (left unchanged).');
+
+            return;
+        }
+        $legacy = glob($directory . '/*create_larasaas_tables.php') !== [];
+        try {
+            $legacy = $legacy || \Illuminate\Support\Facades\Schema::hasTable('larasaas_announcements');
+        } catch (\Illuminate\Database\QueryException $exception) {
+            $this->components->warn('Database unavailable: detecting legacy installs from migration files only.');
+        }
+        if (! is_dir($directory)) {
+            mkdir($directory, 0755, true);
+        }
+        $filename = $legacy ? '2026_10_14_000001_create_larasaas_plans_table.php' : $baseline;
+        $source = __DIR__ . '/../../database/' . ($legacy ? 'migrations/' : 'schema/') . $filename;
+        if (! is_file($directory . '/' . $filename)) {
+            copy($source, $directory . '/' . $filename);
+        }
+        $this->components->twoColumnDetail($legacy ? 'Published additive plans upgrade migration' : 'Published one LaraSaaS schema migration', '<fg=green>DONE</>');
     }
 
     protected function writeEnvMode(string $mode): void

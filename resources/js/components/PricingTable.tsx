@@ -3,7 +3,7 @@ import { LaraSaaSIcon, t } from '../larasaas';
 
 /**
  * <PricingTable /> — every row, price, badge and CTA is generated from
- * config('larasaas.pricing'). It inherits the host's dark mode (.dark
+ * admin-managed plans and pricing display settings. It inherits the host's dark mode (.dark
  * class), typography and accent (--larasaas-accent) automatically.
  */
 
@@ -21,6 +21,8 @@ export interface Plan {
     monthly?: PlanPrice;
     yearly?: PlanPrice;
     features?: string[];
+    entitlements?: Record<string, boolean | number>;
+    limits?: Record<string, number>;
 }
 
 export interface PricingConfig {
@@ -158,6 +160,7 @@ export default function PricingTable({ pricing, subscription, onSelect, initialI
                                     <button
                                         className={`ls-btn ${plan.highlight ? 'ls-btn--accent' : ''}`}
                                         type="button"
+                                        disabled={!entry?.stripe_id}
                                         onClick={() => onSelect?.(key, interval)}
                                     >
                                         {subscription?.subscribed

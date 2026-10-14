@@ -27,6 +27,8 @@ export default function Dashboard() {
                     <h1 className="ls-page__title">{greeting || t('dashboard.title', 'Dashboard')}</h1>
                 </header>
 
+                {larasaas?.is_admin && <a className="ls-btn" href={`${larasaas.web_base}/admin/plans`}>Manage plans</a>}
+
                 <div className="ls-stat-grid">
                     <section className="ls-card">
                         <p className="ls-card__label">{t('dashboard.plan', 'Plan')}</p>

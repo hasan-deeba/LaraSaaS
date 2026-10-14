@@ -2,6 +2,7 @@
 
 use Illuminate\Support\Facades\Route;
 use LaraSaaS\Http\Controllers\EmbedController;
+use LaraSaaS\Http\Middleware\AuthenticatesEmbedUser;
 
 /*
 |--------------------------------------------------------------------------
@@ -16,10 +17,13 @@ use LaraSaaS\Http\Controllers\EmbedController;
 |
 */
 
-Route::get('/pricing', [EmbedController::class, 'pricing'])->name('pricing');
+Route::get('/pricing', [EmbedController::class, 'pricing'])->middleware(AuthenticatesEmbedUser::class . ':optional')->name('pricing');
+Route::middleware(AuthenticatesEmbedUser::class)->group(function () {
 Route::get('/billing', [EmbedController::class, 'billing'])->name('billing');
 
 Route::post('/billing/subscribe/{plan}', [EmbedController::class, 'subscribe'])->name('billing.subscribe');
 Route::post('/billing/cancel', [EmbedController::class, 'cancel'])->name('billing.cancel');
 Route::post('/billing/resume', [EmbedController::class, 'resume'])->name('billing.resume');
 Route::post('/billing/portal', [EmbedController::class, 'portal'])->name('billing.portal');
+
+});

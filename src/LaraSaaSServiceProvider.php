@@ -41,6 +41,16 @@ class LaraSaaSServiceProvider extends ServiceProvider
         // (integration.mode: inertia | all)
         if ($larasaas->servesInertia()) {
             Route::group([
+                'domain' => config('larasaas.route.domain'),
+                'prefix' => config('larasaas.route.prefix', 'app'),
+                'middleware' => array_merge(config('larasaas.route.public_middleware', ['web']), [
+                    \LaraSaaS\Http\Middleware\ShareLaraSaaSProps::class,
+                ]),
+                'as' => config('larasaas.route.name_prefix', 'larasaas.'),
+            ], function () {
+                Route::get('/pricing', [\LaraSaaS\Http\Controllers\BillingController::class, 'pricing'])->name('pricing');
+            });
+            Route::group([
                 'domain'     => config('larasaas.route.domain'),
                 'prefix'     => config('larasaas.route.prefix', 'app'),
                 'middleware' => config('larasaas.route.middleware', ['web', 'auth']),
@@ -55,9 +65,13 @@ class LaraSaaSServiceProvider extends ServiceProvider
         // (integration.mode: inertia | api | embed | all)
         if ($larasaas->servesApi()) {
             $middleware = config('larasaas.route.api_middleware', ['web', 'auth']);
+            $publicMiddleware = array_merge(config('larasaas.route.public_api_middleware', ['web']), [
+                \LaraSaaS\Http\Middleware\OptionalPricingUser::class,
+            ]);
 
             if (config('larasaas.integration.api.cors_origins')) {
                 array_unshift($middleware, \LaraSaaS\Http\Middleware\ApiCors::class);
+                array_unshift($publicMiddleware, \LaraSaaS\Http\Middleware\ApiCors::class);
             }
 
             Route::group([
@@ -67,9 +81,14 @@ class LaraSaaSServiceProvider extends ServiceProvider
                 'as'         => config('larasaas.route.name_prefix', 'larasaas.') . 'api.',
             ], function () {
                 $this->loadRoutesFrom(__DIR__ . '/../routes/api.php');
-
-                // CORS preflights (OPTIONS) must match a route to reach the
-                // ApiCors middleware; answer them here.
+            });
+            Route::group([
+                'domain' => config('larasaas.route.domain'),
+                'prefix' => config('larasaas.route.api_prefix', 'api/larasaas'),
+                'middleware' => $publicMiddleware,
+                'as' => config('larasaas.route.name_prefix', 'larasaas.') . 'api.',
+            ], function () {
+                Route::get('/pricing', [\LaraSaaS\Http\Controllers\Api\BillingApiController::class, 'pricing'])->name('pricing');
                 Route::options('/{path}', fn () => response('', 204))->where('path', '.*');
             });
         }
@@ -86,7 +105,6 @@ class LaraSaaSServiceProvider extends ServiceProvider
             ]);
 
             $embedMiddleware = array_merge($embedMiddleware, [
-                \LaraSaaS\Http\Middleware\AuthenticatesEmbedUser::class,
                 \LaraSaaS\Http\Middleware\EmbedFrameHeaders::class,
             ]);
 
@@ -109,7 +127,7 @@ class LaraSaaSServiceProvider extends ServiceProvider
 
     protected function registerResources(): void
     {
-        $this->loadMigrationsFrom(__DIR__ . '/../database/migrations');
+        // Migrations are published by larasaas:install; the host owns execution.
         $this->loadTranslationsFrom(__DIR__ . '/../resources/lang', 'larasaas');
         $this->loadViewsFrom(__DIR__ . '/../resources/views', 'larasaas');
     }
@@ -125,7 +143,8 @@ class LaraSaaSServiceProvider extends ServiceProvider
         ], 'larasaas-config');
 
         $this->publishes([
-            __DIR__ . '/../database/migrations' => database_path('migrations'),
+            __DIR__ . '/../database/schema/2026_10_14_000000_create_larasaas_schema.php'
+                => database_path('migrations/2026_10_14_000000_create_larasaas_schema.php'),
         ], 'larasaas-migrations');
 
         $this->publishes([

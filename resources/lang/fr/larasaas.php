@@ -22,6 +22,7 @@ return [
     ],
 
     'pricing' => [
+        'sign_in' => 'Connectez-vous pour choisir une offre',
         'title'          => 'Tarifs',
         'subtitle'       => 'Commencez gratuitement, évoluez à votre rythme. Résiliable à tout moment.',
         'monthly'        => 'Mensuel',

@@ -5,14 +5,15 @@ namespace LaraSaaS;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
-use Illuminate\Support\Arr;
+use LaraSaaS\Models\Plan;
+use LaraSaaS\Support\PlanFeatures;
 use Illuminate\Support\Facades\URL;
 use Laravel\Cashier\Billable;
 use LogicException;
 
 /**
  * The central LaraSaaS manager — resolves the host application's models,
- * shapes config-driven plans/announcement typings for the React UI, and
+ * shapes database-backed plans/announcement typings for the React UI, and
  * knows who the "billable" entity is.
  */
 class LaraSaaS
@@ -115,12 +116,13 @@ class LaraSaaS
 
     public function plans(): array
     {
-        return config('larasaas.pricing.plans', []);
+        return Plan::query()->where('active', true)->orderBy('sort_order')->orderBy('id')->get()
+            ->mapWithKeys(fn (Plan $plan) => [$plan->key => $plan->forPricing()])->all();
     }
 
     public function plan(?string $key): ?array
     {
-        return $key === null ? null : Arr::get($this->plans(), $key);
+        return $key === null ? null : ($this->plans()[$key] ?? null);
     }
 
     public function planKeys(): array
@@ -182,7 +184,10 @@ class LaraSaaS
             return null;
         }
 
-        foreach ($this->plans() as $key => $plan) {
+        // Archived plans still identify existing subscriptions and entitlements.
+        foreach (Plan::query()->get() as $record) {
+            $key = $record->key;
+            $plan = $record->forPricing();
             foreach (['monthly', 'yearly'] as $interval) {
                 if (($plan[$interval]['stripe_id'] ?? null) === $priceId) {
                     return $key;
@@ -191,6 +196,42 @@ class LaraSaaS
         }
 
         return null;
+    }
+
+    public function planFeatureDefinitions(): array
+    {
+        return app(PlanFeatures::class)->definitions();
+    }
+
+    /** Entitlements are server-side subscription checks, not Pennant rollout flags. */
+    public function entitlement(Request $request, string $feature): bool|int|float|null
+    {
+        $definition = $this->planFeatureDefinitions()[$feature] ?? null;
+        if ($definition === null) {
+            return null;
+        }
+        $denied = $definition['type'] === 'boolean' ? false : 0;
+        $billable = $this->billable($request);
+        if (! $billable || ! $billable->subscribed($this->subscriptionName())) {
+            return $denied;
+        }
+        $key = $this->planKeyForPrice($billable->subscription($this->subscriptionName())?->stripe_price);
+        $plan = $key ? Plan::query()->where('key', $key)->first() : null;
+
+        return $plan ? app(PlanFeatures::class)->values($plan->features ?? [])[$feature] : $denied;
+    }
+
+    /** Pass total usage AFTER the proposed operation; -1 means unlimited. */
+    public function allows(Request $request, string $feature, float $usage = 0): bool
+    {
+        $value = $this->entitlement($request, $feature);
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return $value !== null && is_finite($usage) && $usage >= 0
+            && ($value == -1 || ($value > 0 && $usage <= $value));
     }
 
     /*
@@ -257,14 +298,22 @@ class LaraSaaS
      * already authenticated for the given user — no shared session required.
      * Hand this URL to your <iframe> / WebView and LaraSaaS does the rest.
      */
-    public function embedUrl($user, string $page = 'pricing', array $params = [], ?int $minutes = null): string
+    public function embedUrl($user = null, string $page = 'pricing', array $params = [], ?int $minutes = null): string
     {
+        if ($user === null) {
+            if ($page !== 'pricing') {
+                throw new LogicException('Only embed pricing can be viewed without a user.');
+            }
+
+            return route($this->embedRouteName('pricing'), array_diff_key($params, array_flip(['user', 'signature', 'expires'])));
+        }
+
         $ttl = $minutes ?? (int) config('larasaas.integration.embed.token_ttl', 60);
 
         return URL::temporarySignedRoute(
             $this->embedRouteName($page),
             now()->addMinutes(max(1, $ttl)),
-            array_merge(['user' => $user->getAuthIdentifier()], $params),
+            array_merge($params, ['user' => $user->getAuthIdentifier()]),
         );
     }
 
