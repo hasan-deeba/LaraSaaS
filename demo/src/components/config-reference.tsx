@@ -25,7 +25,7 @@ const TABS: { key: string; file: string; code: string }[] = [
     'intervals' => ['monthly', 'yearly'],
 ],
 
-// Admin: /app/admin/plans → Starter: 10 GB; Pro: 100 GB.
+// Your dashboard: LaraSaaS::createPlan($data) → Starter: 10 GB; Pro: 100 GB.
 // Plans and Stripe Price IDs live in the database, NOT config.
 // Server-side enforcement (your app tracks usage):
 LaraSaaS::allows($request, 'uploads');

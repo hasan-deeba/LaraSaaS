@@ -29,7 +29,7 @@ class PlansTest extends TestCase
 
     protected function defineDatabaseMigrations(): void
     {
-        (require __DIR__ . '/../database/schema/2026_10_14_000000_create_larasaas_schema.php')->up();
+        (require __DIR__ . '/../database/migrations/2026_10_14_000000_create_larasaas_schema.php')->up();
         Schema::create('users', function (Blueprint $table) {
             $table->id();
             $table->string('email');
@@ -157,6 +157,25 @@ class PlansTest extends TestCase
         $this->get($expired)->assertForbidden();
         $this->actingAs($user)->post('/embed/billing/cancel')->assertForbidden();
         $this->post($manager->embedUrl($user, 'billing.cancel'), ['user' => 123])->assertForbidden();
+    }
+
+    public function test_public_embed_helper_needs_no_user_and_cannot_claim_identity(): void
+    {
+        $manager = app(LaraSaaS::class);
+        $url = $manager->embedUrl(null, 'pricing', [
+            'user' => 42, 'signature' => 'fake', 'expires' => 1, 'interval' => 'yearly',
+        ]);
+        $this->assertStringNotContainsString('user=', $url);
+        $this->assertStringNotContainsString('signature=', $url);
+        $this->assertStringNotContainsString('expires=', $url);
+        $this->get($url)->assertOk();
+        foreach (['subscribe/starter', 'cancel', 'resume', 'portal'] as $action) {
+            $this->post('/embed/billing/' . $action)->assertForbidden();
+        }
+        $this->get('/embed/admin/plans')->assertNotFound();
+        $this->post('/embed/admin/plans', $this->payload())->assertNotFound();
+        $this->expectException(\LogicException::class);
+        $manager->embedUrl(null, 'billing');
     }
 
     public function test_cors_preflight_does_not_require_login(): void

@@ -4,8 +4,8 @@
 
 - This is `hasan-deeba/larasaas`, a Composer library supporting PHP 8.2+ and Laravel 10/11/12 (Cashier 15/16). `demo/` is an export-ignored Next.js showcase, not the production billing/admin backend.
 - Never add host authentication or overwrite host User models. The host owns auth, the Billable trait, workspace resolution, Stripe credentials and usage accounting.
-- Version 2 uses **database-backed plans** (`src/Models/Plan.php`). Do not restore `pricing.plans` or seed fake products/Stripe IDs in migrations.
-- Developers own `config/larasaas.php` → `plan_features`: stable snake_case keys and boolean/integer/number definitions. Admins assign validated values in `Admin/Plans`. `features` is the separate Pennant rollout catalog; it is not paid entitlement enforcement.
+- Version 3 uses **database-backed plans** (`src/Models/Plan.php`). Do not restore `pricing.plans` or seed fake products/Stripe IDs in migrations.
+- Developers own `config/larasaas.php` → `plan_features`: stable snake_case keys and boolean/integer/number definitions. Admins assign validated values through `createPlan`/`updatePlan` in the host dashboard (or the optional `Admin/Plans` page). `features` is the separate Pennant rollout catalog; it is not paid entitlement enforcement.
 - Plan keys/Stripe IDs are stable subscription identifiers. Archive, never erase, catalog rows. Archived plans cannot be purchased but still resolve existing subscriptions and entitlements. Features change for current subscribers when edited.
 - `LaraSaaS::allows()`/`entitlement()` are server checks on Cashier's current billable subscription, not quota usage counters. Host apps must use atomic accounting for concurrent usage.
 
@@ -18,15 +18,15 @@
 
 ## Migrations and upgrades
 
-- `database/schema/2026_10_14_000000_create_larasaas_schema.php` is the single fresh-install baseline.
-- `database/migrations/2025_01_01_000001_create_larasaas_tables.php` is immutable legacy history; the 2026 plans migration is an additive upgrade. Never run baseline and legacy schema together.
-- `larasaas:install` selects a baseline for fresh apps or the additive migration for legacy apps. It never overwrites existing migration files. Migrations are not auto-loaded from vendor. Cashier retains its own migrations.
-- Do not silently drop or recreate user data. Document any future schema/entitlement-key upgrade explicitly.
+- `database/migrations/2026_10_14_000000_create_larasaas_schema.php` is the only package migration. Define all LaraSaaS tables/columns directly in it for this unused baseline; do not restore legacy/additive migrations.
+- `larasaas:install` publishes the baseline without overwriting host files, including renamed timestamps. Migrations are not auto-loaded from vendor. Cashier retains its own migrations.
+- No automatic upgrade from old split migrations is shipped. Never drop/recreate real host data. A future deployed-schema upgrade needs an explicit migration strategy.
+- Plan writes belong in `Support/PlanManager`, exposed by the manager/facade (`createPlan`, `updatePlan`, `archivePlan`). Reuse its validation in the optional admin UI; host controllers own authorization. Embeds are for customer pricing/billing, never admin forms.
 
 ## Verification
 
 - `composer install` then `vendor/bin/pest`; lint with `find src config routes database tests -name '*.php' -print0 | xargs -0 -n1 php -l`.
 - GitHub Actions runs the Laravel 10/11/12 matrix. All must pass before a release.
 - `npm ci` then `npm run typecheck:package` validates the shipped React source; demo checks are `npm run typecheck` and `npm run lint`.
-- Add regression tests for authorization, typed features, signed identity, entitlement lifecycle and migration upgrades. Do not call live Stripe in tests.
+- Add regression tests for authorization, typed features, signed identity, entitlement lifecycle and single-schema installation/rollback and manager writes without package routes. Do not call live Stripe in tests.
 - Update README, CHANGELOG, this guide and `.github/copilot-instructions.md` for architectural changes. Tag breaking changes as a major version. Git tags, not composer.json's version field, determine Composer releases.

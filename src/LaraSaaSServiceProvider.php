@@ -143,7 +143,7 @@ class LaraSaaSServiceProvider extends ServiceProvider
         ], 'larasaas-config');
 
         $this->publishes([
-            __DIR__ . '/../database/schema/2026_10_14_000000_create_larasaas_schema.php'
+            __DIR__ . '/../database/migrations/2026_10_14_000000_create_larasaas_schema.php'
                 => database_path('migrations/2026_10_14_000000_create_larasaas_schema.php'),
         ], 'larasaas-migrations');
 

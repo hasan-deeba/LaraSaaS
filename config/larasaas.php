@@ -135,7 +135,7 @@ return [
     | Pricing display settings & developer-defined plan features
     |--------------------------------------------------------------------------
     |
-    | Admins create plan records in the dashboard; no plan data lives here.
+    | Your dashboard calls LaraSaaS::createPlan(); no plan data lives here.
     | These settings control how the database-backed catalog is displayed.
     |
     */
@@ -157,8 +157,6 @@ return [
         'currencies'           => ['usd' => '$', 'eur' => '€', 'sar' => 'ر.س'],
         'yearly_savings_badge' => '2 months free',
         'contact_sales'        => ['enabled' => true, 'label' => 'Talk to sales', 'url' => 'mailto:sales@example.com'],
-
-
     ],
 
     /*

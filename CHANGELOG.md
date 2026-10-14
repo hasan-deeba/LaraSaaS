@@ -2,6 +2,24 @@
 
 All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
+## 3.0.0 — 2026-10-14
+
+### Breaking changes
+
+- Remove the unused split/legacy migration paths. The package now contains exactly one migration in `database/migrations`, defining all LaraSaaS tables and columns directly. Cashier keeps ownership of its separate billing migrations. There is no automatic upgrade from the old split schema; see README before installing over an existing database.
+- The consolidated 2.0 baseline retains its filename and schema, so projects that already published it need no schema changes. Installation never overwrites it, even with `--force` or a host-renamed timestamp.
+
+### Added
+
+- Public `LaraSaaS::createPlan()`, `updatePlan()` and `archivePlan()` functions for developer-owned dashboards in every integration mode, without an admin embed or an HTTP request. Host applications authorize the caller.
+- Shared plan validation for the manager and optional Inertia admin controller, typed feature defaults, partial updates and preserved archived subscription mappings.
+- Regression coverage for direct catalog writes, identifier immutability, guest pricing/private billing, no admin embeds, and the single migration's installation/rollback/reinstallation.
+
+### Documentation
+
+- Lead with `LaraSaaS::embedUrl()` for public pricing: no user or signature needed. Billing/subscription operations remain authenticated; embed writes remain signed.
+- Document native dashboard form/controller integration, the one-file schema and database-only plan storage. No sample plans or Stripe IDs are inserted by migrations.
+
 ## 2.0.0 — 2026-10-14
 
 ### Breaking changes

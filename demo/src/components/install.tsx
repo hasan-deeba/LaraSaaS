@@ -24,7 +24,7 @@ const STEPS = [
   {
     num: "03",
     title: "Stripe keys",
-    lines: ["STRIPE_KEY=pk_test_…  STRIPE_SECRET=sk_test_…", "# Create plans and set Price IDs at /app/admin/plans"],
+    lines: ["STRIPE_KEY=pk_test_…  STRIPE_SECRET=sk_test_…", "# Your dashboard calls LaraSaaS::createPlan($data)"],
     note: "install.note3",
   },
   {

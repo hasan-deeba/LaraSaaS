@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\URL;
 use LaraSaaS\Models\Plan;
 use LaraSaaS\Support\PlanFeatures;
+use LaraSaaS\Support\PlanManager;
 use Laravel\Cashier\Billable;
 use LogicException;
 
@@ -113,6 +114,22 @@ class LaraSaaS
     | Pricing
     |--------------------------------------------------------------------------
     */
+
+    /** Host controllers must authorize the administrator before calling catalog writes. */
+    public function createPlan(array $attributes): Plan
+    {
+        return app(PlanManager::class)->create($attributes);
+    }
+
+    public function updatePlan(Plan $plan, array $attributes): Plan
+    {
+        return app(PlanManager::class)->update($plan, $attributes);
+    }
+
+    public function archivePlan(Plan $plan): Plan
+    {
+        return app(PlanManager::class)->archive($plan);
+    }
 
     public function plans(): array
     {
@@ -294,9 +311,9 @@ class LaraSaaS
     }
 
     /**
-     * Signed, expiring URL for one of the embed pages ("pricing" | "billing"),
-     * already authenticated for the given user — no shared session required.
-     * Hand this URL to your <iframe> / WebView and LaraSaaS does the rest.
+     * Public pricing: embedUrl() — no user or signature required.
+     * Private billing: embedUrl($user, 'billing') — signed and expiring.
+     * Embeds are customer-facing only; manage plans through createPlan/updatePlan.
      */
     public function embedUrl($user = null, string $page = 'pricing', array $params = [], ?int $minutes = null): string
     {
