@@ -5,9 +5,9 @@ namespace LaraSaaS;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\URL;
 use LaraSaaS\Models\Plan;
 use LaraSaaS\Support\PlanFeatures;
-use Illuminate\Support\Facades\URL;
 use Laravel\Cashier\Billable;
 use LogicException;
 

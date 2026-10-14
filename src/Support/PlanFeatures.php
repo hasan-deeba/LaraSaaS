@@ -24,15 +24,11 @@ class PlanFeatures
     public function rules(): array
     {
         $definitions = $this->definitions();
-        $rules = ['features' => ['present', 'array', function ($attribute, $values, $fail) use ($definitions) {
+        $rules = ['features' => ['bail', 'present', 'array', function ($attribute, $values, $fail) use ($definitions) {
             if (array_diff(array_keys($values), array_keys($definitions))) {
                 $fail('Only developer-defined plan features may be assigned.');
             }
         }]];
-        // An empty catalog accepts an empty map.
-        if ($definitions === []) {
-            $rules['features'][0] = 'present';
-        }
         foreach ($definitions as $key => $definition) {
             $type = $definition['type'];
             $rules["features.{$key}"] = ['sometimes', $type === 'number' ? 'numeric' : $type];

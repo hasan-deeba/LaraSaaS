@@ -314,7 +314,7 @@ Stable versions are published as git tags (e.g. `v1.0.0`). If no version matchin
 
 ## Configuration highlights
 
-Everything lives in `config/larasaas.php`:
+Integration settings and developer feature definitions live in `config/larasaas.php`; plan records live in the database:
 
 ```php
 // How your frontend consumes LaraSaaS — switch any time

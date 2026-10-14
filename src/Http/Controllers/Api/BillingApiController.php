@@ -28,7 +28,7 @@ class BillingApiController extends Controller
             'data' => $this->larasaas->pricingForUi(),
             'subscription' => $this->larasaas->subscriptionForUi($request),
             'authenticated' => $request->user() !== null,
-        ]);
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     /**

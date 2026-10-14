@@ -64,7 +64,7 @@ class PlanAdminController extends Controller
         foreach (['monthly', 'yearly'] as $interval) {
             $rules[$interval] = ['nullable', 'array:price,stripe_id'];
             $rules["{$interval}.price"] = ["required_with:{$interval}", 'numeric', 'min:0'];
-            $rules["{$interval}.stripe_id"] = ["required_with:{$interval}", 'string', 'max:255', 'regex:/^price_[a-zA-Z0-9_]+$/', function ($attribute, $value, $fail) use ($interval, $plan) {
+            $rules["{$interval}.stripe_id"] = ['bail', "required_with:{$interval}", 'string', 'max:255', 'regex:/^price_[a-zA-Z0-9_]+$/', function ($attribute, $value, $fail) use ($interval, $plan) {
                 $query = Plan::query()->where(function ($query) use ($value) {
                     $query->where('monthly->stripe_id', $value)->orWhere('yearly->stripe_id', $value);
                 });

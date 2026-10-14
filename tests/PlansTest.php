@@ -101,7 +101,7 @@ class PlansTest extends TestCase
     public function test_validation_rejects_unknown_features_bad_types_and_price_collisions(): void
     {
         $this->actingAs($this->user('admin@example.com'));
-        foreach ([['unknown' => true], ['storage_gb' => -2], ['storage_gb' => 1.5], ['uploads' => 'yes']] as $features) {
+        foreach (['not-a-map', null, ['unknown' => true], ['storage_gb' => -2], ['storage_gb' => 1.5], ['uploads' => 'yes']] as $features) {
             $this->postJson('/app/admin/plans', $this->payload(['features' => $features]))->assertUnprocessable();
         }
         $this->postJson('/app/admin/plans', $this->payload(['features' => ['storage_gb' => -1]]))->assertRedirect();
