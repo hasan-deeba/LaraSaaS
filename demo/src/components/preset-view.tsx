@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { motion } from "framer-motion";
 import { ArrowLeft, Database, Share2 } from "lucide-react";
 import { useSite } from "./providers";
@@ -14,9 +15,9 @@ export function PresetView({ config, slug }: { config: DemoPricing; slug: string
   return (
     <div className="min-h-screen">
       <header className="mx-auto flex max-w-6xl items-center justify-between px-5 pt-6">
-        <a href="/" className="flex items-center gap-3">
+        <Link href="/" className="flex items-center gap-3">
           <Wordmark />
-        </a>
+        </Link>
         <div className="flex items-center gap-2">
           <span className="hidden items-center gap-2 rounded-full border border-line px-3.5 py-1.5 font-mono text-[11px] text-muted sm:inline-flex">
             <Share2 size={11} className="text-accent-2" />
@@ -48,7 +49,7 @@ export function PresetView({ config, slug }: { config: DemoPricing; slug: string
           </h1>
           <p className="mx-auto mt-4 max-w-xl text-sm leading-relaxed text-muted md:text-base">
             Someone designed these plans in the LaraSaaS playground and hit save. The same JSON drops into
-            config/larasaas.php and renders in any Laravel app.
+            a read-only demo preview. Production plans are created by admins in the dashboard.
           </p>
         </motion.div>
 
@@ -66,17 +67,17 @@ export function PresetView({ config, slug }: { config: DemoPricing; slug: string
           transition={{ delay: 0.3 }}
           className="mx-auto mt-14 max-w-3xl"
         >
-          <CodeBlock code={pricingToPhp(config)} title="config/larasaas.php — generated" lang="php" maxHeight={380} />
+          <CodeBlock code={pricingToPhp(config)} title="Sample pricing data — not config" lang="php" maxHeight={380} />
         </motion.div>
 
         <div className="mt-14 text-center">
-          <a
+          <Link
             href="/#pricing"
             className="inline-flex items-center gap-2 rounded-full bg-fg px-6 py-3 text-sm font-semibold text-bg transition hover:opacity-85"
           >
             <ArrowLeft size={15} className="rtl:rotate-180" />
             Build your own in the playground
-          </a>
+          </Link>
         </div>
       </main>
     </div>

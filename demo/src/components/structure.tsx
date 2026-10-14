@@ -17,8 +17,8 @@ interface Node {
 const TREE: Node[] = [
   { path: "larasaas/", depth: 0, folder: true, icon: Box, note: "The composer package root. Push it to GitHub, tag a release, publish on Packagist." },
   { path: "composer.json", depth: 1, icon: FileJson, note: "Auto-discovers the service provider + facade. Requires Cashier, Pennant and the Inertia Laravel adapter." },
-  { path: "config/larasaas.php", depth: 1, icon: Palette, note: "The control room: user model, routes, plans, announcement typings, flag strategies, theming, locales." },
-  { path: "src/LaraSaaSServiceProvider.php", depth: 1, icon: FileCode2, note: "Registers routes, migrations, translations, publishes, the admin gate, middleware aliases and config-driven Pennant definitions." },
+  { path: "config/larasaas.php", depth: 1, icon: Palette, note: "The control room: user model, routes, typed plan features, announcement typings, flag strategies, theming, locales." },
+  { path: "src/LaraSaaSServiceProvider.php", depth: 1, icon: FileCode2, note: "Registers routes, migration publishing, translations, publishes, the admin gate, middleware aliases and config-driven Pennant definitions." },
   { path: "src/LaraSaaS.php + Facades/", depth: 1, icon: FileCode2, note: "The manager: resolves your User model, the billable (user or workspace), plans → UI payloads." },
   { path: "src/Http/Controllers/", depth: 1, icon: Route, note: "Dashboard, Billing (Cashier checkout/swap/cancel/portal), Announcements API, Feature flags API, Admin panels." },
   { path: "src/Http/Controllers/StripeWebhookController.php", depth: 2, icon: CreditCard, note: "Extends Cashier's webhook controller and fires one SubscriptionChanged event per lifecycle change." },

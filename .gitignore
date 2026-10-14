@@ -11,3 +11,6 @@ demo/.env
 /composer.lock
 /.phpunit.cache/
 /.phpunit.result.cache
+
+# TypeScript incremental build cache
+*.tsbuildinfo

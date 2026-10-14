@@ -16,6 +16,7 @@ class PlansTest extends TestCase
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
+        $app['config']->set('cors.paths', []); // Exercise package CORS, not the host's global middleware.
         $app['config']->set('app.key', 'base64:' . base64_encode(str_repeat('a', 32)));
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
@@ -162,6 +163,39 @@ class PlansTest extends TestCase
     {
         $this->options('/api/larasaas/billing/cancel', [], ['Origin' => 'https://client.example.com'])
             ->assertNoContent()->assertHeader('Access-Control-Allow-Origin', 'https://client.example.com');
+    }
+
+    public function test_public_pricing_can_resolve_an_optional_token_guard(): void
+    {
+        $user = $this->user();
+        \Illuminate\Support\Facades\Auth::viaRequest('catalog-token', fn ($request) => $request->bearerToken() === 'valid-token' ? $user : null);
+        config([
+            'auth.guards.catalog' => ['driver' => 'catalog-token'],
+            'larasaas.route.pricing_guard' => 'catalog',
+        ]);
+        $this->getJson('/api/larasaas/pricing', ['Authorization' => 'Bearer valid-token'])
+            ->assertOk()->assertJsonPath('authenticated', true);
+        \Illuminate\Support\Facades\Auth::forgetGuards();
+        $this->getJson('/api/larasaas/pricing?user=' . $user->id, ['Authorization' => 'Bearer invalid-token'])
+            ->assertOk()->assertJsonPath('authenticated', false);
+    }
+
+    public function test_workspace_entitlements_use_the_resolved_billable(): void
+    {
+        Plan::create($this->payload());
+        $workspace = new CatalogUser;
+        $workspace->billingState = new Subscription(['stripe_price' => 'price_starter_yearly', 'stripe_status' => 'trialing', 'trial_ends_at' => now()->addWeek()]);
+        config([
+            'larasaas.billing.billable' => 'workspace',
+            'larasaas.billing.workspace_resolver' => fn ($user) => $workspace,
+        ]);
+        $request = Request::create('/');
+        $request->setUserResolver(fn () => new User);
+        $this->assertSame(10, app(LaraSaaS::class)->entitlement($request, 'storage_gb'));
+        $workspace->billingState->stripe_status = 'canceled';
+        $workspace->billingState->trial_ends_at = null;
+        $workspace->billingState->ends_at = now()->addDay();
+        $this->assertTrue(app(LaraSaaS::class)->allows($request, 'uploads'));
     }
 
     public function test_catalog_can_be_added_to_without_a_schema_change(): void

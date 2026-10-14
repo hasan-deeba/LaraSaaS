@@ -49,6 +49,17 @@ class InstallTest extends TestCase
         $this->assertFalse(Schema::hasTable('larasaas_announcements'));
     }
 
+    public function test_install_and_migrate_does_not_run_legacy_schema_alongside_baseline(): void
+    {
+        Schema::create('users', function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->id();
+        });
+        $this->artisan('larasaas:install', ['--mode' => 'api', '--migrate' => true])->assertSuccessful();
+        $this->assertTrue(Schema::hasTable('larasaas_plans'));
+        $this->assertTrue(Schema::hasTable('subscriptions'));
+        $this->assertSame(1, \Illuminate\Support\Facades\DB::table('migrations')->where('migration', 'like', '%larasaas%')->count());
+    }
+
     public function test_upgrade_only_adds_plans_and_preserves_legacy_tables(): void
     {
         (require __DIR__ . '/../database/migrations/2025_01_01_000001_create_larasaas_tables.php')->up();

@@ -1,4 +1,4 @@
-/* Shared constants for the live demos — mirrors config/larasaas.php */
+/* Showcase fixtures only. Production plans are managed in the database. */
 
 export interface DemoPlan {
   key: string;
@@ -66,34 +66,23 @@ export const ANNOUNCEMENT_TYPES: Record<string, { color: string; icon: string }>
   promo: { color: "#a855f7", icon: "sparkles" },
 };
 
-/** Renders a plan config as a config/larasaas.php-ready PHP snippet. */
+/** Read-only sample UI data, never a production plan configuration. */
 export function pricingToPhp(pricing: DemoPricing): string {
-  const planBlocks = pricing.plans
-    .map((plan) => {
-      const badge = plan.badge ? `'${plan.badge}'` : "null";
-      return `            '${plan.key}' => [
-                'name'        => '${plan.name}',
-                'description' => '${(plan.description ?? "").replace(/'/g, "\\'")}',
-                'highlight'   => ${plan.highlight ? "true" : "false"},
-                'badge'       => ${badge},
-                'trial_days'  => ${plan.trial ?? "null"},
-                'monthly'     => ['price' => ${plan.monthly ?? "null"}, 'stripe_id' => env('STRIPE_PRICE_${plan.key.toUpperCase()}_MONTHLY')],
-                'yearly'      => ['price' => ${plan.yearly ?? "null"}, 'stripe_id' => env('STRIPE_PRICE_${plan.key.toUpperCase()}_YEARLY')],
-                'features'    => [
-${plan.features.map((f) => `                    '${f.replace(/'/g, "\\'")}',`).join("\n")}
-                ],
-            ],`;
-    })
-    .join("\n\n");
-
-  return `'pricing' => [
-        'default_currency'     => '${pricing.currency}',
-        'default_interval'     => 'monthly',
-        'intervals'            => ['monthly', 'yearly'],
-        'yearly_savings_badge' => '2 months free',
-
-        'plans' => [
-${planBlocks}
-        ],
-    ],`;
+  const quote = (value: string) => "'" + value.replace(/\\/g, "\\\\").replace(/'/g, "\\'") + "'";
+  const plans = pricing.plans.map(plan => `    ${quote(plan.key)} => [
+        'name' => ${quote(plan.name)},
+        'monthly' => ['price' => ${plan.monthly ?? 'null'}],
+        'yearly' => ['price' => ${plan.yearly ?? 'null'}],
+        'features' => [${plan.features.map(quote).join(', ')}],
+    ],`).join('\n');
+  return `// Showcase data only — NOT config/larasaas.php.
+// Production: create plans at /app/admin/plans, then read:
+// LaraSaaS::pricingForUi() or GET /api/larasaas/pricing
+// No plans are seeded by the installer.
+[
+  'currency' => ${quote(pricing.currency)},
+  'plans' => [
+${plans}
+  ],
+]`;
 }
