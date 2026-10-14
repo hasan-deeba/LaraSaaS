@@ -12,7 +12,7 @@ const STEPS = [
   {
     num: "01",
     title: "Require",
-    lines: ["composer require larasaas/larasaas"],
+    lines: ["composer require hasan-deeba/larasaas"],
     note: "install.note1",
   },
   {
@@ -24,7 +24,7 @@ const STEPS = [
   {
     num: "03",
     title: "Stripe keys",
-    lines: ["STRIPE_KEY=pk_test_…  STRIPE_SECRET=sk_test_…", "STRIPE_PRICE_GROWTH_MONTHLY=price_…"],
+    lines: ["STRIPE_KEY=pk_test_…  STRIPE_SECRET=sk_test_…", "# Create plans and set Price IDs at /app/admin/plans"],
     note: "install.note3",
   },
   {
@@ -41,7 +41,7 @@ export function Install() {
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText("composer require larasaas/larasaas");
+      await navigator.clipboard.writeText("composer require hasan-deeba/larasaas");
     } catch {}
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
@@ -98,7 +98,7 @@ export function Install() {
                 className="shine inline-flex items-center gap-3 rounded-full bg-bg px-6 py-3.5 font-mono text-sm text-fg transition-transform hover:scale-[1.03] active:scale-95"
               >
                 <span className="text-accent">$</span>
-                composer require larasaas/larasaas
+                composer require hasan-deeba/larasaas
                 {copied ? <Check size={15} className="text-emerald-500" /> : <Copy size={15} className="opacity-60" />}
               </button>
               <a
@@ -108,7 +108,7 @@ export function Install() {
                 className="inline-flex items-center gap-2.5 rounded-full border border-bg/25 px-6 py-3.5 text-sm font-semibold transition hover:bg-bg/10"
               >
                 <GithubIcon size={16} />
-                larasaas/larasaas
+                hasan-deeba/larasaas
               </a>
             </div>
           </div>

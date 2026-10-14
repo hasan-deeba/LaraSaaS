@@ -19,14 +19,16 @@ class BillingApiController extends Controller
     public function __construct(protected LaraSaaS $larasaas, protected BillingActions $billing) {}
 
     /**
-     * The complete pricing matrix from config/larasaas.php — everything a
+     * The complete admin-managed pricing matrix — everything a
      * client needs to render its own pricing table.
      */
-    public function pricing(): JsonResponse
+    public function pricing(Request $request): JsonResponse
     {
         return response()->json([
             'data' => $this->larasaas->pricingForUi(),
-        ]);
+            'subscription' => $this->larasaas->subscriptionForUi($request),
+            'authenticated' => $request->user() !== null,
+        ])->header('Cache-Control', 'private, no-store');
     }
 
     /**

@@ -26,6 +26,8 @@ export function SiteProviders({ children }: { children: ReactNode }) {
   const [locale, setLocaleState] = useState<Locale>("en");
 
   useEffect(() => {
+    // Sync external persisted browser preferences only after hydration.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setTheme(document.documentElement.classList.contains("dark") ? "dark" : "light");
     const stored = localStorage.getItem("ls-locale") as Locale | null;
     if (stored && ["en", "fr", "ar"].includes(stored)) setLocaleState(stored);

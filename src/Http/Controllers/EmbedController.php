@@ -40,15 +40,15 @@ class EmbedController extends Controller
             'notice'       => $this->notice($request),
             'nav'          => [
                 'pricing' => $this->larasaas->embedUrl($user, 'pricing', ['interval' => $interval]),
-                'billing' => $this->larasaas->embedUrl($user, 'billing'),
+                'billing' => $user ? $this->larasaas->embedUrl($user, 'billing') : null,
             ],
             'intervals'    => collect(config('larasaas.pricing.intervals', ['monthly', 'yearly']))
                 ->mapWithKeys(fn (string $i) => [$i => $this->larasaas->embedUrl($user, 'pricing', ['interval' => $i])])
                 ->all(),
-            'subscribe'    => collect($this->larasaas->planKeys())
+            'subscribe'    => collect($user ? $this->larasaas->planKeys() : [])
                 ->mapWithKeys(fn (string $key) => [$key => $this->larasaas->embedUrl($user, 'billing.subscribe', ['plan' => $key])])
                 ->all(),
-            'returns'      => $this->returnUrls($user, $interval),
+            'returns'      => $user ? $this->returnUrls($user, $interval) : [],
         ]);
     }
 
@@ -64,14 +64,14 @@ class EmbedController extends Controller
             'notice'       => $this->notice($request),
             'nav'          => [
                 'pricing' => $this->larasaas->embedUrl($user, 'pricing'),
-                'billing' => $this->larasaas->embedUrl($user, 'billing'),
+                'billing' => $user ? $this->larasaas->embedUrl($user, 'billing') : null,
             ],
             'actions'      => [
                 'portal' => $this->larasaas->embedUrl($user, 'billing.portal'),
                 'cancel' => $this->larasaas->embedUrl($user, 'billing.cancel'),
                 'resume' => $this->larasaas->embedUrl($user, 'billing.resume'),
             ],
-            'subscribe'    => collect($this->larasaas->planKeys())
+            'subscribe'    => collect($user ? $this->larasaas->planKeys() : [])
                 ->mapWithKeys(fn (string $key) => [$key => $this->larasaas->embedUrl($user, 'billing.subscribe', ['plan' => $key])])
                 ->all(),
             'returns'      => $this->returnUrls($user),

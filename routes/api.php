@@ -29,7 +29,6 @@ Route::get('/features', [FeatureFlagController::class, 'index'])->name('features
 | envelope (checkout/portal return `{"url": …}` to open).
 */
 Route::get('/subscription', [BillingApiController::class, 'subscription'])->name('subscription.status');
-Route::get('/pricing', [BillingApiController::class, 'pricing'])->name('pricing');
 Route::get('/invoices', [BillingApiController::class, 'invoices'])->name('invoices');
 Route::post('/billing/subscribe/{plan}', [BillingApiController::class, 'subscribe'])->name('billing.subscribe');
 Route::post('/billing/swap/{plan}', [BillingApiController::class, 'swap'])->name('billing.swap');

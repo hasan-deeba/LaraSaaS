@@ -11,7 +11,7 @@ import { Copy, Check, ArrowDown, Megaphone, Flag, CreditCard, Sparkles } from "l
 import { useSite } from "./providers";
 
 const COMMANDS = [
-  "composer require larasaas/larasaas",
+  "composer require hasan-deeba/larasaas",
   "php artisan larasaas:install --migrate",
   "stripe listen --forward-to localhost/larasaas/webhooks/stripe",
   "open http://localhost:8000/app/pricing",
@@ -107,7 +107,7 @@ export function Hero() {
 
   const copy = async () => {
     try {
-      await navigator.clipboard.writeText("composer require larasaas/larasaas");
+      await navigator.clipboard.writeText("composer require hasan-deeba/larasaas");
     } catch {}
     setCopied(true);
     setTimeout(() => setCopied(false), 1800);
@@ -192,7 +192,7 @@ export function Hero() {
               aria-label={t("hero.copy_cmd")}
             >
               <span className="text-accent">$</span>
-              composer require larasaas/larasaas
+              composer require hasan-deeba/larasaas
               {copied ? <Check size={15} className="text-emerald-500" /> : <Copy size={15} className="opacity-60 group-hover:opacity-100" />}
             </button>
 

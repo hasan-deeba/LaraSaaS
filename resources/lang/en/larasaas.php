@@ -22,6 +22,7 @@ return [
     ],
 
     'pricing' => [
+        'sign_in' => 'Sign in to choose a plan',
         'title'          => 'Pricing',
         'subtitle'       => 'Start free, scale when you do. Cancel anytime.',
         'monthly'        => 'Monthly',

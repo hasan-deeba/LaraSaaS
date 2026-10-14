@@ -9,29 +9,27 @@ import { CodeBlock } from "./code";
 const TABS: { key: string; file: string; code: string }[] = [
   {
     key: "plans",
-    file: "'pricing' =>",
-    code: `'pricing' => [
-    'default_currency'     => 'usd',
-    'default_interval'     => 'monthly',
-    'intervals'            => ['monthly', 'yearly'],
-    'currencies'           => ['usd' => '$', 'eur' => '€', 'sar' => 'ر.س'],
-    'yearly_savings_badge' => '2 months free',
-    'contact_sales'        => ['enabled' => true, 'url' => 'mailto:sales@you.test'],
-
-    'plans' => [
-        'growth' => [
-            'name'      => 'Growth',
-            'highlight' => true,
-            'badge'     => 'Most popular',
-            'trial_days'=> 14,
-            'monthly'   => ['price' => 29,  'stripe_id' => env('STRIPE_PRICE_GROWTH_MONTHLY')],
-            'yearly'    => ['price' => 290, 'stripe_id' => env('STRIPE_PRICE_GROWTH_YEARLY')],
-            'features'  => ['5 workspaces', 'Unlimited projects', '…'],
-            'limits'    => ['seats' => 10, 'projects' => -1],
-        ],
-        // add, remove, rename — the React table follows
+    file: "'plan_features' =>",
+    code: `// Developers define capabilities; admins create plans in the dashboard.
+'plan_features' => [
+    'uploads' => ['label' => 'File uploads', 'type' => 'boolean', 'default' => false],
+    'storage_gb' => [
+        'label' => 'Storage', 'type' => 'integer', 'unit' => 'GB',
+        'default' => 0, 'allow_unlimited' => true,
     ],
-],`,
+],
+
+'pricing' => [
+    'default_currency' => 'usd',
+    'default_interval' => 'monthly',
+    'intervals' => ['monthly', 'yearly'],
+],
+
+// Admin: /app/admin/plans → Starter: 10 GB; Pro: 100 GB.
+// Plans and Stripe Price IDs live in the database, NOT config.
+// Server-side enforcement (your app tracks usage):
+LaraSaaS::allows($request, 'uploads');
+LaraSaaS::allows($request, 'storage_gb', $projectedUsageGb);`,
   },
   {
     key: "announce",

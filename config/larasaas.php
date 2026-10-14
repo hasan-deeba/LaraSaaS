@@ -37,6 +37,10 @@ return [
         'name_prefix'      => 'larasaas.',
         'middleware'       => ['web', 'auth'],
         'api_middleware'   => ['web', 'auth'],
+        'public_middleware' => ['web'],
+        'public_api_middleware' => ['web'],
+        // Optional guard used on public pricing (e.g. sanctum); never requires login.
+        'pricing_guard' => null,
         'admin_middleware' => ['web', 'auth', 'can:larasaas-admin'],
 
         // The embed surface is deliberately stateless-ish: it authenticates
@@ -124,19 +128,27 @@ return [
         'trial_days'           => 14,
         'allow_promotion_codes'=> true,
         'collect_tax_ids'      => false,
-        'prices_source'        => 'config',                         // config | stripe (live lookup)
     ],
 
     /*
     |--------------------------------------------------------------------------
-    | Pricing Plans — 100% config driven
+    | Pricing display settings & developer-defined plan features
     |--------------------------------------------------------------------------
     |
-    | Every card in the React pricing table is generated from this array.
-    | Add, remove, rename, highlight — the UI follows. Prices may live here
-    | (`price`) or be pulled live from Stripe (`prices_source => stripe`).
+    | Admins create plan records in the dashboard; no plan data lives here.
+    | These settings control how the database-backed catalog is displayed.
     |
     */
+
+    // Developer-owned entitlement catalog, separate from Pennant rollout flags.
+    // Admins can set values only for these keys; they cannot invent features.
+    'plan_features' => [
+        'uploads' => ['label' => 'File uploads', 'type' => 'boolean', 'default' => false],
+        'storage_gb' => ['label' => 'Storage', 'type' => 'integer', 'unit' => 'GB', 'default' => 0, 'allow_unlimited' => true],
+    ],
+
+    // Host login/registration URL used by public pricing pages.
+    'login_url' => '/login',
 
     'pricing' => [
         'default_currency'     => 'usd',
@@ -146,43 +158,7 @@ return [
         'yearly_savings_badge' => '2 months free',
         'contact_sales'        => ['enabled' => true, 'label' => 'Talk to sales', 'url' => 'mailto:sales@example.com'],
 
-        'plans' => [
-            'starter' => [
-                'name'        => 'Starter',
-                'description' => 'For side-projects and weekend hacks.',
-                'highlight'   => false,
-                'badge'       => null,
-                'trial_days'  => 7,
-                'monthly'     => ['price' => 9,  'stripe_id' => env('STRIPE_PRICE_STARTER_MONTHLY')],
-                'yearly'      => ['price' => 90, 'stripe_id' => env('STRIPE_PRICE_STARTER_YEARLY')],
-                'features'    => ['1 workspace', '3 projects', 'Community support', 'Basic analytics'],
-                'limits'      => ['seats' => 1, 'projects' => 3],
-            ],
 
-            'growth' => [
-                'name'        => 'Growth',
-                'description' => 'For teams shipping fast and measuring everything.',
-                'highlight'   => true,
-                'badge'       => 'Most popular',
-                'trial_days'  => 14,
-                'monthly'     => ['price' => 29,  'stripe_id' => env('STRIPE_PRICE_GROWTH_MONTHLY')],
-                'yearly'      => ['price' => 290, 'stripe_id' => env('STRIPE_PRICE_GROWTH_YEARLY')],
-                'features'    => ['5 workspaces', 'Unlimited projects', 'Priority support', 'Advanced analytics', 'Custom domains'],
-                'limits'      => ['seats' => 10, 'projects' => -1],
-            ],
-
-            'scale' => [
-                'name'        => 'Scale',
-                'description' => 'For companies with compliance & scale needs.',
-                'highlight'   => false,
-                'badge'       => null,
-                'trial_days'  => 30,
-                'monthly'     => ['price' => 79,  'stripe_id' => env('STRIPE_PRICE_SCALE_MONTHLY')],
-                'yearly'      => ['price' => 790, 'stripe_id' => env('STRIPE_PRICE_SCALE_YEARLY')],
-                'features'    => ['Unlimited workspaces', 'SSO / SAML', 'Audit log', '99.9% SLA', 'Dedicated success manager'],
-                'limits'      => ['seats' => -1, 'projects' => -1],
-            ],
-        ],
     ],
 
     /*

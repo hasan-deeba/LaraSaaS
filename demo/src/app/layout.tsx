@@ -20,7 +20,7 @@ export const metadata: Metadata = {
   openGraph: {
     title: "LaraSaaS — Ship your SaaS, keep your stack",
     description:
-      "Composer-installable SaaS boilerplate: Cashier billing, config-driven pricing, announcements and Pennant feature flags with React components.",
+      "Composer-installable SaaS boilerplate: Cashier billing, admin-managed plans, announcements and Pennant feature flags with React components.",
   },
 };
 

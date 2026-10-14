@@ -167,9 +167,9 @@ export function PricingPlayground() {
           >
             <div className="mb-3 flex items-center gap-2 font-mono text-xs text-muted" dir="ltr">
               <FileCode2 size={14} className="text-accent-2" />
-              {t("pricing.as_php")} → config/larasaas.php
+              {t("pricing.as_php")} → sample pricing data
             </div>
-            <CodeBlock code={php} title="config/larasaas.php" lang="php" maxHeight={420} />
+            <CodeBlock code={php} title="Sample pricing data — not config" lang="php" maxHeight={420} />
           </motion.div>
         </div>
       </div>

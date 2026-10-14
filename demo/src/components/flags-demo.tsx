@@ -179,7 +179,7 @@ export function FlagsDemo() {
 
             <div className="rounded-2xl border border-dashed border-line p-4 font-mono text-[11px] leading-relaxed text-muted" dir="ltr">
               <span className="text-fg/70">{t("flags.scope")}:</span> Feature::for([$user,{" "}
-              <span className="text-accent-2">$workspace = "#{workspaceId} {workspaceName}"</span>])
+              <span className="text-accent-2">$workspace = &quot;#{workspaceId} {workspaceName}&quot;</span>])
             </div>
           </motion.div>
 

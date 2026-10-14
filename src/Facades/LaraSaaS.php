@@ -9,6 +9,9 @@ use Illuminate\Support\Facades\Facade;
  * @method static \LaraSaaS\LaraSaaS useUserModel(string $model)
  * @method static \Illuminate\Database\Eloquent\Model|null billable(\Illuminate\Http\Request $request)
  * @method static string subscriptionName()
+ * @method static array planFeatureDefinitions()
+ * @method static bool|int|float|null entitlement(\Illuminate\Http\Request $request, string $feature)
+ * @method static bool allows(\Illuminate\Http\Request $request, string $feature, float $usage = 0)
  * @method static array plans()
  * @method static array|null plan(?string $key)
  * @method static array planKeys()
@@ -27,7 +30,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool servesApi()
  * @method static bool servesEmbed()
  * @method static string embedRouteName(string $page)
- * @method static string embedUrl($user, string $page = 'pricing', array $params = [], ?int $minutes = null)
+ * @method static string embedUrl($user = null, string $page = 'pricing', array $params = [], ?int $minutes = null)
  *
  * @see \LaraSaaS\LaraSaaS
  */

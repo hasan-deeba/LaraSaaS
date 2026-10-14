@@ -16,7 +16,7 @@ LaraSaaS is a **composer package** (not a fork-the-repo starter kit). It adds ev
 
 - **Your auth stays yours** — login/registration live in your project. LaraSaaS resolves the user model from `config('larasaas.user_model')` (`App\Models\User` by default) and never ships its own.
 - **Stripe Billing via Laravel Cashier** — subscription provisioning through Stripe Checkout, plan swaps with proration, cancel/resume, invoices, and the secure customer portal. Bill the **user** or a **workspace**.
-- **Config-driven pricing table** — every card, badge, CTA, interval and currency comes from `config/larasaas.php` and renders as a polished React `<PricingTable />` that follows your dark/light theme.
+- **Admin-managed plans** — create, edit and archive plans in the dashboard. Prices and typed feature values live in the database; developers define the feature catalog in config. The React and embed pricing tables follow automatically.
 - **Announcements system** — global broadcasts with colored typings, scheduling windows, audience targeting, CTAs and per-user dismissible persistence.
 - **Feature flags via Laravel Pennant** — database-driven toggles with percentage rollouts, workspace targeting and e-mail targeting, all declared in config.
 - **Theme & i18n native** — components read your CSS variables, follow your `.dark` class automatically, ship EN/FR/AR translations and are fully RTL-aware.
@@ -61,7 +61,7 @@ Follow the standard [Installation](#installation) below — there is nothing ext
 
 When your frontend lives on another server — or is a **Flutter / native** app — you usually want **APIs only**, and you design your own tables & pricing screens in your own design system. Set `LARASAAS_INTEGRATION_MODE=api` and LaraSaaS serves exactly that: a JSON API (plus the Stripe webhook). No LaraSaaS views, no React publishing.
 
-Every plan in `config/larasaas.php` is returned as data, so your pricing table is 100% yours — the API gives you the complete matrix to render.
+Every active plan in the database is returned as data, so your pricing table is 100% yours — the API gives you the complete matrix to render.
 
 #### Endpoints
 
@@ -69,7 +69,7 @@ All endpoints live under `/api/larasaas` (configurable via `route.api_prefix`):
 
 | Method | Endpoint | Purpose |
 |--------|----------|---------|
-| `GET` | `/pricing` | The full pricing matrix (plans, prices, intervals, currencies, trial days, contact-sales…) — everything your own pricing table needs |
+| `GET` | `/pricing` | **Public**, optionally authenticated. The full pricing matrix (plans, prices, intervals, currencies, trial days, contact-sales…) — everything your own pricing table needs |
 | `GET` | `/subscription` | Current subscription state (`subscribed`, `on_trial`, `on_grace_period`, `ends_at`, `plan`, …) |
 | `GET` | `/invoices` | Recent invoices (id, date, total, status, PDF URL) |
 | `POST` | `/billing/subscribe/{plan}` | Start checkout → returns the Stripe Checkout `url` to open (or reports a `swap` if already subscribed). Body: `interval`, optional `success_url` / `cancel_url` |
@@ -83,8 +83,7 @@ All endpoints live under `/api/larasaas` (configurable via `route.api_prefix`):
 
 ```bash
 # The plan matrix for your own pricing table
-curl -s https://api.yourapp.test/api/larasaas/pricing \
-     -H "Authorization: Bearer {token}"
+curl -s https://api.yourapp.test/api/larasaas/pricing
 ```
 
 ```ts
@@ -114,12 +113,20 @@ final plans = jsonDecode(res.body)['data']['plans']; // build your own pricing w
 
 #### Auth & CORS
 
-- `route.api_middleware` decides how API requests authenticate. For cross-server clients, point it at token auth, e.g. `'api_middleware' => ['api', 'auth:sanctum']`, and issue tokens (Sanctum, Passport, …) from your own login endpoint. Same-origin clients can keep the default `['web', 'auth']` session auth.
-- Browser SPAs on a different origin need CORS: set `integration.api.cors_origins` (env `LARASAAS_API_CORS_ORIGINS=https://app.example.com`). Flutter/native clients don't need CORS at all.
+- All API endpoints **except `GET /pricing` and CORS preflight** require authentication by default. `route.api_middleware` decides how protected API requests authenticate. For cross-server clients, point it at token auth, e.g. `'api_middleware' => ['api', 'auth:sanctum']`, and issue tokens (Sanctum, Passport, …) from your own login endpoint. Same-origin clients can keep the default `['web', 'auth']` session auth.
+- Public pricing uses `route.public_api_middleware` (default `['web']` for optional session authentication). For token clients use `['api']` and set `route.pricing_guard` to `'sanctum'` (or your guard). Do **not** add `auth:sanctum` to the public stack. Missing/invalid credentials are treated as guests; no identity is accepted from a user ID in the API query/body.
+- Pricing returns `{ "data": { ...pricing }, "authenticated": false, "subscription": { "subscribed": false } }`. Valid optional credentials include the caller's subscription state; invoices still require a separate authenticated request. Avoid shared/CDN caching of personalized pricing responses.
+- Browser SPAs on a different origin need CORS: set `integration.api.cors_origins` (env `LARASAAS_API_CORS_ORIGINS=https://app.example.com`). Flutter/native clients don't need CORS at all. If the host's global Laravel CORS middleware handles `api/*`, configure its allowed origins/credentials consistently or exclude the package path from it; global preflight handling runs before LaraSaaS middleware.
 
 ### Mode 3 — Embed the UI with `<iframe>` / WebView → `embed`
 
 If you don't want to rebuild the pricing/billing UI for your separate React SPA or Flutter app, let the **package** serve it and embed it — like a Stripe pricing table. Set `LARASAAS_INTEGRATION_MODE=embed` and LaraSaaS registers standalone pages (`/embed/pricing`, `/embed/billing`) that are **server-rendered, self-contained and need no Node/Vite build** on the Laravel side.
+
+#### Public pricing and signed billing
+
+Guests can embed `/embed/pricing` directly, or use `LaraSaaS::embedUrl()` / `LaraSaaS::embedUrl(null, 'pricing')`. No signature or user is needed. They see plans and a sign-in link, not invoices, billing navigation or checkout forms. Set `login_url` in config to your host's login/registration URL.
+
+First-party session users are recognized automatically on GET pages. For cross-server authenticated visitors, generate a signed URL **on your trusted server for the currently authenticated user**, never from a user ID supplied by the client. Billing pages are private, and every embed POST requires a signed user URL (including session users), since the embed surface intentionally omits CSRF middleware. Invalid, expired or tampered identity signatures return 403; they never downgrade to guest access.
 
 #### Signed embed URLs — no shared sessions
 
@@ -182,7 +189,7 @@ The manager works regardless of mode — the mode only controls which ready-made
 ## Installation
 
 ```bash
-composer require hasan-deeba/larasaas:^1.0
+composer require hasan-deeba/larasaas:^2.0
 php artisan larasaas:install            # asks which integration mode you need
 # php artisan larasaas:install --mode=api    # or pick it up front:
 # php artisan larasaas:install --mode=embed
@@ -191,7 +198,7 @@ php artisan larasaas:install            # asks which integration mode you need
 
 LaraSaaS follows semantic versioning: pin the **major** version in your project (`^1.0` for the 1.x line) instead of `*`, so `composer update` only ever brings you non-breaking minor/patch releases. If you deliberately want the newest `main` build, install with `hasan-deeba/larasaas:@dev`.
 
-The install command asks for your [integration mode](#which-integration-is-right-for-you) and writes it to `.env` as `LARASAAS_INTEGRATION_MODE`, then publishes the config, migrations and translations (plus the React components in `inertia`/`all` mode), publishes Cashier's migrations, and (optionally) runs the migrations.
+The install command asks for your [integration mode](#which-integration-is-right-for-you) and writes it to `.env` as `LARASAAS_INTEGRATION_MODE`, then publishes the config, **one consolidated LaraSaaS schema migration on fresh installs**, and translations (plus the React components in `inertia`/`all` mode), publishes Cashier's own migrations separately, and (optionally) runs the migrations. The LaraSaaS migration creates plans, announcements and dismissals; it inserts **no sample plans**. Cashier owns its billing schema and Pennant owns its feature-flag storage: these are not folded into LaraSaaS's migration. Migrations are published, not auto-loaded from vendor. Re-running the installer does not overwrite LaraSaaS migrations, even with `--force`. If the legacy announcement schema or migration exists, installation publishes only the additive plans migration instead of a new baseline.
 
 ### Cashier setup
 
@@ -244,12 +251,6 @@ STRIPE_KEY=pk_test_...
 STRIPE_SECRET=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
 
-STRIPE_PRICE_STARTER_MONTHLY=price_...
-STRIPE_PRICE_STARTER_YEARLY=price_...
-STRIPE_PRICE_GROWTH_MONTHLY=price_...
-STRIPE_PRICE_GROWTH_YEARLY=price_...
-STRIPE_PRICE_SCALE_MONTHLY=price_...
-STRIPE_PRICE_SCALE_YEARLY=price_...
 ```
 
 Two one-time touches in your React entry (`resources/js/app.tsx`) — **only for `inertia` / `all` mode** (the `api` and `embed` modes don't publish React components at all):
@@ -269,7 +270,7 @@ resolve: (name) =>
 @import '../js/LaraSaaS/larasaas.css';
 ```
 
-Visit `/app/pricing` (or `/embed/pricing`, or hit `/api/larasaas/pricing` — depending on your mode) — you're a SaaS. The URL prefix, middleware, route names and even the domain are configurable under the `route` key.
+Create plans at `/app/admin/plans` first (see below), then visit `/app/pricing` (or `/embed/pricing`, or hit `/api/larasaas/pricing` — depending on your mode) — you're a SaaS. The URL prefix, middleware, route names and even the domain are configurable under the `route` key.
 
 ### Stripe webhook
 
@@ -313,7 +314,7 @@ Stable versions are published as git tags (e.g. `v1.0.0`). If no version matchin
 
 ## Configuration highlights
 
-Everything lives in `config/larasaas.php`:
+Integration settings and developer feature definitions live in `config/larasaas.php`; plan records live in the database:
 
 ```php
 // How your frontend consumes LaraSaaS — switch any time
@@ -336,22 +337,21 @@ Everything lives in `config/larasaas.php`:
     'workspace_resolver' => fn ($user) => $user->currentWorkspace(),
 ],
 
-// The whole pricing table is data
+// Developers define capabilities and types; admins assign values to plans.
+'plan_features' => [
+    'uploads' => ['label' => 'File uploads', 'type' => 'boolean', 'default' => false],
+    'storage_gb' => [
+        'label' => 'Storage', 'type' => 'integer', 'unit' => 'GB',
+        'default' => 0, 'allow_unlimited' => true,
+    ],
+],
+
+// Display settings only — no plans or Stripe price IDs in config.
 'pricing' => [
     'default_currency' => 'usd',
     'currencies' => ['usd' => '$', 'eur' => '€', 'sar' => 'ر.س'],
-    'plans' => [
-        'growth' => [
-            'name' => 'Growth',
-            'highlight' => true,
-            'badge' => 'Most popular',
-            'trial_days' => 14,
-            'monthly' => ['price' => 29, 'stripe_id' => env('STRIPE_PRICE_GROWTH_MONTHLY')],
-            'yearly'  => ['price' => 290, 'stripe_id' => env('STRIPE_PRICE_GROWTH_YEARLY')],
-            'features' => ['5 workspaces', 'Priority support', '…'],
-        ],
-        // add / remove plans freely — the UI follows
-    ],
+    'intervals' => ['monthly', 'yearly'],
+    'default_interval' => 'monthly',
 ],
 
 // Announcement typings → colors + icons consumed by the React stack
@@ -367,6 +367,70 @@ Everything lives in `config/larasaas.php`:
 ],
 ```
 
+## Admin-managed plans and developer-defined features
+
+### Responsibilities
+
+- **Developer:** implement the capability and declare its stable key/type in `plan_features`. Config is version-controlled, supports `config:cache`, and prevents dashboard users from inventing executable capabilities. An application enum may hold the same keys if you want compile-time references in your own code; no database enum migration is needed when adding a feature.
+- **Admin:** visit `/app/admin/plans` (Inertia or `all` mode), create plans, set existing Stripe recurring Price IDs, display prices, trial days, badges, order and per-feature values. Configure `LARASAAS_ADMIN_EMAILS` or your `larasaas-admin` Gate. In API/embed-only deployments, use `all` to also expose the shipped Inertia admin dashboard, or implement your own protected admin UI using `LaraSaaS\Models\Plan` and `LaraSaaS\Support\PlanFeatures` validation.
+- **Application:** enforce entitlements on the server. Showing/hiding a frontend feature is not authorization.
+
+Feature keys use `snake_case`. Supported types are `boolean`, `integer`, and `number`. Numeric values are non-negative; `-1` is accepted only when `allow_unlimited` is true. Omitted values use developer defaults. Unknown keys and wrong value types are rejected by the admin endpoints. Removing a key from the developer catalog immediately stops exposing it; changing a key/type requires an application data migration/review.
+
+Example: create **Starter** with `uploads = true`, `storage_gb = 10`, and **Pro** with `uploads = true`, `storage_gb = 100`. Both use the same developer feature definitions, with different admin-assigned limits. Features are returned as display labels (`features`), typed values (`entitlements`), and numeric values (`limits`). Pennant's `features` config remains a **separate rollout system**, not your paid entitlement source.
+
+A plan must offer at least one of monthly/yearly, each with a display amount and a distinct Stripe `price_...` ID. Create the prices in Stripe first, using the configured currency and matching recurring intervals. LaraSaaS does not create Stripe products/prices or validate their remote amounts; Stripe's price is what gets charged. Display amounts do not change Stripe charges.
+
+Plan keys and Stripe Price IDs cannot be changed after creation through the dashboard. Archive an old plan and create a new one for price changes. Archives stop new checkouts/swaps into that plan but preserve subscription-to-plan lookup and entitlements for existing subscribers. Feature edits apply to current subscribers too. There is no destructive delete button.
+
+### Enforce upload and storage limits
+
+```php
+use LaraSaaS\Facades\LaraSaaS;
+
+abort_unless(LaraSaaS::allows($request, 'uploads'), 403);
+
+// Use the same units as your catalog. This example uses decimal GB.
+$projectedGb = ($usedBytes + $request->file('file')->getSize()) / 1_000_000_000;
+abort_unless(LaraSaaS::allows($request, 'storage_gb', $projectedGb), 403);
+
+$limit = LaraSaaS::entitlement($request, 'storage_gb'); // 10, 100, -1, or 0
+```
+
+`entitlement()` resolves the configured billable user/workspace and its valid Cashier subscription (including trial/grace rules). Guests, expired subscriptions, and unmapped prices receive `false`/`0`; unknown features return `null`. `allows()` fails closed on unknown features, negative/invalid usage and zero limits. An archived plan still grants its existing subscribers their entitlements. Keep Cashier webhook processing current.
+
+These helpers **do not track, reserve or deduct usage**, nor upload files. Your application owns usage accounting and must use transactional locking/reservations to prevent simultaneous uploads exceeding a quota. For multi-item subscriptions, add application-specific entitlement resolution; the built-in helper maps the subscription's single `stripe_price`.
+
+### Upgrade from 1.x to 2.0
+
+This is a breaking change: `pricing.plans` and `billing.prices_source` are no longer read. Back up your database/config and use maintenance mode during migration so users cannot reach an empty catalog.
+
+1. Update Composer to `^2.0` and run `php artisan larasaas:install --mode=YOUR_MODE` **without `--force`**. Existing installs receive the additive plans migration, not a replacement announcement migration. Run `php artisan migrate` (or choose yes in the installer). Do not publish the fresh-only `larasaas-migrations` baseline over a legacy installation.
+2. Merge the new `plan_features`, public routing middleware, `pricing_guard` and `login_url` settings into your published config. Define the features your app actually enforces. Existing middleware settings continue protecting private endpoints; don't remove their auth middleware.
+3. Recreate your existing plans in the admin dashboard with the **same keys and Stripe Price IDs**, including hidden/retired plans still used by subscriptions. Alternatively use this one-time trusted server-side import before removing the old config. It never overwrites an existing database plan:
+
+   ```php
+   use LaraSaaS\Models\Plan;
+   use LaraSaaS\Support\PlanFeatures;
+   use Illuminate\Support\Arr;
+
+   foreach (config('larasaas.pricing.plans', []) as $key => $old) {
+       Plan::firstOrCreate(['key' => $key], array_merge(
+           Arr::only($old, ['name', 'description', 'highlight', 'badge', 'trial_days', 'monthly', 'yearly']),
+           ['active' => true, 'sort_order' => 0,
+            'features' => app(PlanFeatures::class)->values($old['limits'] ?? [])],
+       ));
+   }
+   ```
+
+   Old marketing bullet lists are **not entitlement definitions**. Review imported values, set booleans/limits explicitly, and verify each Stripe ID and amount. Delete the legacy `pricing.plans` block only after migration and verification.
+4. Re-publish changed React components (`larasaas-react`), translations (`larasaas-lang`) and any previously overridden embed views (`larasaas-views`) with `vendor:publish --tag=... --force` after backing up customizations. Clear config/route/view caches and rebuild your frontend.
+5. Verify public pricing, admin access, existing subscribers' entitlements, signed embed links, checkout and webhooks in your environment before leaving maintenance mode. Roll back the application **and** database together; rolling back the plans migration removes plan records.
+
+## Release and deployment
+
+This repository is a Composer library, not a hosted Laravel service. Releases use semantic Git tags and GitHub releases; Packagist indexes the tag via the repository's integration. Consumer apps must run `composer update hasan-deeba/larasaas --with-all-dependencies`, install/publish the migration, migrate, rebuild published assets, and deploy through their own pipeline. The `demo/` Next.js site is only a development showcase, not the billing backend. Never treat demo sample plans as the production plan catalog.
+
 ## Using the pieces
 
 ### Gate routes behind a subscription
@@ -376,7 +440,7 @@ Route::middleware('larasaas.subscribed')->group(/* … */);
 Route::get('/reports', ReportController::class)->middleware('larasaas.subscribed:price_123');
 ```
 
-### Gate code/UI behind a flag
+### Gate code/UI behind a rollout flag (not a paid entitlement)
 
 ```php
 use Laravel\Pennant\Feature;
@@ -426,13 +490,15 @@ composer.json          the package manifest (auto-discovery wired)
 config/                larasaas.php — every knob, documented
 src/                   PHP namespace LaraSaaS (PSR-4)
 routes/                web.php, api.php, webhook.php
-database/migrations/   announcements + dismissals tables
+database/schema/       single fresh-install migration (plans, announcements, dismissals)
+database/migrations/   immutable legacy migration + additive plans upgrade
 resources/js/          React components & Inertia pages (published into host apps)
 resources/lang/        EN / FR / AR translations
 resources/views/       Inertia fallback root view + standalone embed pages
 demo/                  interactive showcase site (Next.js) — DEV ONLY,
                        export-ignored via .gitattributes, never shipped
-tests/                 Pest suite
+tests/                 Pest/PHPUnit regression suite
+AGENTS.md              contributor and AI-agent architecture/test guidance
 ```
 
 Consumers installing through Composer receive only `composer.json`, `config/`, `src/`, `routes/`, `database/`, `resources/`, `README.md`, `CHANGELOG.md` and `LICENSE`. Everything development-facing (demo site, tests, CI) is stripped from dist archives by `.gitattributes`.

@@ -60,13 +60,14 @@
                     @endforeach
                 </ul>
 
+                @if ($user)
                 <form method="POST"
                       action="{{ $subscribe[$key] ?? '#' }}"
                       target="_top">
                     <input type="hidden" name="interval" value="{{ $interval }}">
                     <input type="hidden" name="success_url" value="{{ $returns['success'] }}">
                     <input type="hidden" name="cancel_url" value="{{ $returns['canceled'] }}">
-                    <button type="submit" class="ls-btn" {{ $isCurrent ? 'disabled' : '' }}>
+                    <button type="submit" class="ls-btn" {{ $isCurrent || empty($plan[$interval]['stripe_id']) ? 'disabled' : '' }}>
                         @if ($isCurrent)
                             {{ __('larasaas::larasaas.pricing.current_plan') }}
                         @elseif (! empty($subscription['subscribed']))
@@ -76,6 +77,9 @@
                         @endif
                     </button>
                 </form>
+                @else
+                    <a class="ls-btn" href="{{ config('larasaas.login_url', '/login') }}" target="_top">{{ __('larasaas::larasaas.pricing.sign_in') }}</a>
+                @endif
 
                 @if (! empty($pricing['contact_sales']['enabled']) && ($plan['monthly']['price'] ?? null) === null)
                     <a class="ls-btn is-ghost" style="margin-top:10px"

@@ -20,9 +20,13 @@ export default function Pricing() {
     useEffect(() => bootLaraSaaS(larasaas), [larasaas]);
 
     const select = (planKey: string, interval: string) => {
+        if (!larasaas?.authenticated) {
+            window.location.assign(larasaas?.login_url ?? '/login');
+            return;
+        }
         const route = subscription?.subscribed
-            ? `/app/billing/swap/${planKey}`
-            : `/app/billing/subscribe/${planKey}`;
+            ? `${larasaas.web_base}/billing/swap/${planKey}`
+            : `${larasaas.web_base}/billing/subscribe/${planKey}`;
 
         router.post(route, { interval });
     };
@@ -30,7 +34,7 @@ export default function Pricing() {
     return (
         <div data-larasaas dir={larasaas?.dir ?? 'ltr'} className="ls-page">
             <Head title={t('pricing.title', 'Pricing')} />
-            <AnnouncementStack />
+            {larasaas?.authenticated && <AnnouncementStack />}
 
             <header className="ls-page__header">
                 <h1 className="ls-page__title">{t('pricing.title', 'Pricing')}</h1>
