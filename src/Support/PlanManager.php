@@ -6,7 +6,8 @@ use Illuminate\Support\Facades\Validator;
 use Illuminate\Validation\Rule;
 use LaraSaaS\Models\Plan;
 
-/** Validated catalog writes for any host dashboard, command or seeder.
+/**
+ * Validated catalog writes for any host dashboard, command or seeder.
  * The caller owns authorization; this service does not depend on HTTP or embeds.
  */
 class PlanManager
@@ -92,7 +93,8 @@ class PlanManager
                 $data[$interval]['price'] = (float) $data[$interval]['price'];
             }
         }
-        $data['features'] = $catalog->values($data['features']);
+        // Laravel can omit an empty parent array when only nested rules remain.
+        $data['features'] = $catalog->values($data['features'] ?? []);
 
         return $data;
     }

@@ -67,6 +67,22 @@ class PlanManagementTest extends TestCase
         $this->assertSame(['uploads' => false, 'storage_gb' => 0], $plan->features);
     }
 
+    public function test_empty_feature_map_resets_values_to_catalog_defaults(): void
+    {
+        $plan = LaraSaaS::createPlan($this->payload());
+        LaraSaaS::updatePlan($plan, ['features' => []]);
+        $this->assertSame(['uploads' => false, 'storage_gb' => 0], $plan->fresh()->features);
+    }
+
+    public function test_plans_work_with_an_empty_feature_catalog(): void
+    {
+        config(['larasaas.plan_features' => []]);
+        $plan = LaraSaaS::createPlan($this->payload(['features' => []]));
+        $this->assertSame([], $plan->features);
+        LaraSaaS::updatePlan($plan, ['name' => 'No capabilities']);
+        $this->assertSame([], $plan->fresh()->features);
+    }
+
     public function test_create_uses_validation_without_an_http_request(): void
     {
         foreach ([

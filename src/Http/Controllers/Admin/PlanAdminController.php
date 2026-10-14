@@ -40,5 +40,4 @@ class PlanAdminController extends Controller
 
         return back();
     }
-
 }
