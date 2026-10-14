@@ -76,7 +76,7 @@ export function pricingToPhp(pricing: DemoPricing): string {
         'features' => [${plan.features.map(quote).join(', ')}],
     ],`).join('\n');
   return `// Showcase data only — NOT config/larasaas.php.
-// Production: create plans at /app/admin/plans, then read:
+// Production: your dashboard calls LaraSaaS::createPlan($data), then read:
 // LaraSaaS::pricingForUi() or GET /api/larasaas/pricing
 // No plans are seeded by the installer.
 [

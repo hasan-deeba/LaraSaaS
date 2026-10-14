@@ -80,7 +80,7 @@ class InstallCommand extends Command
         $this->newLine();
         $this->components->info('LaraSaaS is ready. Next steps:');
         $this->line('  1. Add your Stripe keys to .env: <comment>STRIPE_KEY, STRIPE_SECRET, STRIPE_WEBHOOK_SECRET</comment>');
-        $this->line('  2. Define <comment>plan_features</comment> in config, then create plans at <comment>/app/admin/plans</comment> (Inertia/all mode)');
+        $this->line('  2. Define <comment>plan_features</comment> in config, then call <comment>LaraSaaS::createPlan($data)</comment> from your protected dashboard');
         $this->line('  3. Point Stripe webhooks at <comment>/larasaas/webhooks/stripe</comment> and exclude it from CSRF');
 
         $this->line('  4. Add <comment>Laravel\\Cashier\\Billable</comment> to your billable model (user, or workspace for workspace billing; see README Cashier setup)');
@@ -95,27 +95,17 @@ class InstallCommand extends Command
     protected function publishMigrations(): void
     {
         $directory = database_path('migrations');
-        $baseline = '2026_10_14_000000_create_larasaas_schema.php';
-        if (is_file($directory . '/' . $baseline)) {
+        $filename = '2026_10_14_000000_create_larasaas_schema.php';
+        if (glob($directory . '/*_create_larasaas_schema.php')) {
             $this->components->info('LaraSaaS schema migration already published (left unchanged).');
 
             return;
         }
-        $legacy = glob($directory . '/*create_larasaas_tables.php') !== [];
-        try {
-            $legacy = $legacy || \Illuminate\Support\Facades\Schema::hasTable('larasaas_announcements');
-        } catch (\Illuminate\Database\QueryException $exception) {
-            $this->components->warn('Database unavailable: detecting legacy installs from migration files only.');
-        }
         if (! is_dir($directory)) {
             mkdir($directory, 0755, true);
         }
-        $filename = $legacy ? '2026_10_14_000001_create_larasaas_plans_table.php' : $baseline;
-        $source = __DIR__ . '/../../database/' . ($legacy ? 'migrations/' : 'schema/') . $filename;
-        if (! is_file($directory . '/' . $filename)) {
-            copy($source, $directory . '/' . $filename);
-        }
-        $this->components->twoColumnDetail($legacy ? 'Published additive plans upgrade migration' : 'Published one LaraSaaS schema migration', '<fg=green>DONE</>');
+        copy(__DIR__ . '/../../database/migrations/' . $filename, $directory . '/' . $filename);
+        $this->components->twoColumnDetail('Published one LaraSaaS schema migration', '<fg=green>DONE</>');
     }
 
     protected function writeEnvMode(string $mode): void
@@ -156,7 +146,8 @@ class InstallCommand extends Command
                 'Render your own pricing tables from the plan matrix the API returns',
             ],
             'embed' => [
-                'Generate signed embed links with <comment>LaraSaaS::embedUrl($user, \'pricing\')</comment> and point your <iframe>/WebView at them',
+                'Embed public pricing with <comment>LaraSaaS::embedUrl()</comment> — no user required',
+                'Generate private billing links with <comment>LaraSaaS::embedUrl($user, \'billing\')</comment> for authenticated users only',
                 'Restrict who may frame the pages via <comment>integration.embed.frame_ancestors</comment>',
                 'Stripe Checkout & the customer portal open in the top-level window automatically',
             ],

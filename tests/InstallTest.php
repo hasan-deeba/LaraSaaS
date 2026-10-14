@@ -43,13 +43,17 @@ class InstallTest extends TestCase
         $migration->up();
         foreach (['larasaas_plans', 'larasaas_announcements', 'larasaas_announcement_dismissals'] as $table) {
             $this->assertTrue(Schema::hasTable($table));
+            $this->assertSame(0, \Illuminate\Support\Facades\DB::table($table)->count());
         }
         $migration->down();
         $this->assertFalse(Schema::hasTable('larasaas_plans'));
         $this->assertFalse(Schema::hasTable('larasaas_announcements'));
+        $this->assertFalse(Schema::hasTable('larasaas_announcement_dismissals'));
+        $migration->up();
+        $this->assertTrue(Schema::hasColumn('larasaas_plans', 'features'));
     }
 
-    public function test_install_and_migrate_does_not_run_legacy_schema_alongside_baseline(): void
+    public function test_install_and_migrate_runs_one_package_schema_and_cashier(): void
     {
         Schema::create('users', function (\Illuminate\Database\Schema\Blueprint $table) {
             $table->id();
@@ -60,17 +64,23 @@ class InstallTest extends TestCase
         $this->assertSame(1, \Illuminate\Support\Facades\DB::table('migrations')->where('migration', 'like', '%larasaas%')->count());
     }
 
-    public function test_upgrade_only_adds_plans_and_preserves_legacy_tables(): void
+    public function test_force_preserves_host_edits_even_with_a_renamed_timestamp(): void
     {
-        (require __DIR__ . '/../database/migrations/2025_01_01_000001_create_larasaas_tables.php')->up();
         $this->install();
-        $files = glob(database_path('migrations/*larasaas*.php'));
-        $this->assertCount(1, $files);
-        $this->assertStringContainsString('create_larasaas_plans_table', $files[0]);
-        $migration = require $files[0];
-        $migration->up();
-        $this->assertTrue(Schema::hasTable('larasaas_plans'));
-        $migration->down();
-        $this->assertTrue(Schema::hasTable('larasaas_announcements'));
+        $file = glob(database_path('migrations/*larasaas*.php'))[0];
+        $customized = file_get_contents($file) . "\n// Host customization\n";
+        $renamed = database_path('migrations/2026_10_15_000000_create_larasaas_schema.php');
+        rename($file, $renamed);
+        file_put_contents($renamed, $customized);
+        $this->artisan('larasaas:install', ['--mode' => 'embed', '--force' => true])
+            ->expectsConfirmation('Run the migrations now?', false)->assertSuccessful();
+        $this->assertCount(1, glob(database_path('migrations/*larasaas*.php')));
+        $this->assertSame($customized, file_get_contents($renamed));
+    }
+
+    public function test_repository_ships_exactly_one_migration(): void
+    {
+        $this->assertCount(1, glob(__DIR__ . '/../database/migrations/*.php'));
+        $this->assertDirectoryDoesNotExist(__DIR__ . '/../database/schema');
     }
 }

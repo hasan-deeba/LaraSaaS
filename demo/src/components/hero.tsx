@@ -284,7 +284,7 @@ export function Hero() {
                 <Megaphone size={12} />
               </span>
               <div>
-                <p className="text-xs font-semibold text-fg">v2.0 just shipped</p>
+                <p className="text-xs font-semibold text-fg">v3.0 just shipped</p>
                 <p className="text-[10px] leading-snug text-muted">Pennant flags, RTL polish & a brand new portal.</p>
               </div>
               <span className="ms-auto h-1.5 w-1.5 shrink-0 rounded-full bg-violet" />
