@@ -1,0 +1,36 @@
+# TEMPORARY development helper — builds vendor/ on CI (sandbox has no Packagist
+# access) and exposes it on the scratch/vendor-cache branch for local test runs.
+# This file is removed before release.
+name: Vendor cache
+
+on:
+  push:
+    branches: ['arena/**']
+
+permissions:
+  contents: write
+
+jobs:
+  cache:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.2'
+          extensions: bcmath, mbstring, pdo_sqlite
+          coverage: none
+          tools: composer:v2
+      - name: Install dependencies
+        run: |
+          composer require --no-update "illuminate/support:12.*" "laravel/cashier:^16.0"
+          composer require --dev --no-update "orchestra/testbench:^10.0" "pestphp/pest:^3.0"
+          composer config allow-plugins.pestphp/pest-plugin true
+          composer update --prefer-dist --no-interaction
+      - name: Push vendor to scratch branch
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f vendor composer.lock
+          git commit -m "vendor cache for ${GITHUB_SHA}"
+          git push -f origin HEAD:refs/heads/scratch/vendor-cache
