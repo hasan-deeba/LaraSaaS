@@ -63,11 +63,10 @@ class InstallCommand extends Command
 
         $this->publishMigrations();
 
-        // Cashier needs its migrations in the host app.
-        if (class_exists(\Laravel\Cashier\Cashier::class)) {
-            $this->callSilently('vendor:publish', ['--tag' => 'cashier-migrations']);
-            $this->components->twoColumnDetail('Published [cashier-migrations]', '<fg=green>DONE</>');
-        }
+        // Cashier needs its migrations in the host app. The stock customer-columns
+        // migration hardcodes `users`; we replace it with a config-aware version
+        // that targets the configured user/workspace model's table.
+        $this->publishCashierMigrations();
 
         $this->writeEnvMode($mode);
 
@@ -75,6 +74,8 @@ class InstallCommand extends Command
             if ($this->call('migrate') !== self::SUCCESS) {
                 return self::FAILURE;
             }
+
+            $this->warnAboutBillingSchema();
         }
 
         $this->newLine();
@@ -84,9 +85,10 @@ class InstallCommand extends Command
         $this->line('  3. Point Stripe webhooks at <comment>/larasaas/webhooks/stripe</comment> and exclude it from CSRF');
 
         $this->line('  4. Add <comment>Laravel\\Cashier\\Billable</comment> to your billable model (user, or workspace for workspace billing; see README Cashier setup)');
+        $this->line('  5. The Cashier customer columns are migrated onto the <comment>configured</comment> model table — after changing <comment>user_model</comment>/<comment>billing.*</comment>, run <comment>php artisan larasaas:doctor</comment> and follow its alerts');
 
         foreach ($this->nextSteps($mode) as $i => $step) {
-            $this->line('  ' . ($i + 5) . ". {$step}");
+            $this->line('  ' . ($i + 6) . ". {$step}");
         }
 
         return self::SUCCESS;
@@ -106,6 +108,69 @@ class InstallCommand extends Command
         }
         copy(__DIR__ . '/../../database/migrations/' . $filename, $directory . '/' . $filename);
         $this->components->twoColumnDetail('Published one LaraSaaS schema migration', '<fg=green>DONE</>');
+    }
+
+    /**
+     * Publish Cashier's migrations (subscriptions & items). The stock
+     * `create_customer_columns` migration hardcodes `users` — the LaraSaaS
+     * schema migration adds the customer columns to the CONFIGURED table
+     * instead (see its Cashier section), so the stock file is skipped with a
+     * note. A host-owned copy that already exists is never touched; the
+     * doctor alerts when it targets the wrong table.
+     */
+    protected function publishCashierMigrations(): void
+    {
+        if (! class_exists(\Laravel\Cashier\Cashier::class)) {
+            return;
+        }
+
+        $existedBefore = glob(database_path('migrations/*create_customer_columns*.php')) ?: [];
+
+        $this->callSilently('vendor:publish', ['--tag' => 'cashier-migrations']);
+        $this->components->twoColumnDetail('Published [cashier-migrations]', '<fg=green>DONE</>');
+
+        if ($existedBefore !== []) {
+            // A host-owned copy is already in place — never overwrite or delete
+            // it. The doctor alerts below flag it when it targets the wrong table.
+            return;
+        }
+
+        foreach (glob(database_path('migrations/*create_customer_columns*.php')) ?: [] as $path) {
+            unlink($path);
+        }
+
+        try {
+            $table = (new \LaraSaaS\Support\BillingSchema)->billableTable();
+            $this->components->twoColumnDetail(
+                'Skipped Cashier [create_customer_columns] (LaraSaaS adds the columns)',
+                "<fg=green>DONE</> <fg=cyan>(table: {$table})</>",
+            );
+        } catch (\Throwable) {
+            $this->components->twoColumnDetail(
+                'Skipped Cashier [create_customer_columns] (LaraSaaS adds the columns)',
+                '<fg=green>DONE</>',
+            );
+        }
+    }
+
+    /** Surface billing-schema problems right after migrating — loud on purpose. */
+    protected function warnAboutBillingSchema(): void
+    {
+        $schema = new \LaraSaaS\Support\BillingSchema;
+
+        try {
+            $problems = $schema->problems();
+        } catch (\Throwable) {
+            return;
+        }
+
+        foreach ($problems as $problem) {
+            $this->components->warn($problem);
+        }
+
+        if ($problems !== []) {
+            $this->components->warn('Run `php artisan larasaas:doctor` anytime to re-check (e.g. after changing larasaas.user_model).');
+        }
     }
 
     protected function writeEnvMode(string $mode): void

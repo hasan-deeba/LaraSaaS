@@ -62,6 +62,12 @@ class InstallTest extends TestCase
         $this->assertTrue(Schema::hasTable('larasaas_plans'));
         $this->assertTrue(Schema::hasTable('subscriptions'));
         $this->assertSame(1, \Illuminate\Support\Facades\DB::table('migrations')->where('migration', 'like', '%larasaas%')->count());
+
+        // The stock Cashier [create_customer_columns] (hardcoded `users`) is
+        // skipped — the config-aware schema migration adds the columns to the
+        // configured model's table instead.
+        $this->assertCount(0, glob(database_path('migrations/*create_customer_columns*.php')));
+        $this->assertTrue(Schema::hasColumn('users', 'stripe_id'));
     }
 
     public function test_force_preserves_host_edits_even_with_a_renamed_timestamp(): void

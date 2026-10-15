@@ -2,6 +2,26 @@
 
 All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
+## 3.1.0 — 2026-10-15
+
+### Added
+
+- **🏢 Multi-tenant Workspaces** — first-party `larasaas_workspaces` tables and models (swap-able via `workspaces.model` / `member_model` / `invitation_model`) so users can operate within parallel organizational structures. Opt in on your user model with `LaraSaaS\Concerns\HasWorkspaces` (`workspaces()`, `currentWorkspace()`, `switchWorkspace()`, `roleIn()`…).
+- **👥 Team Management** — robust invitation lifecycle (invite → e-mail-matched accept by 64-char token → expiry → resend/revoke, re-invite after removal) with granular workspace-level roles (Owner, Admin, Member). `WorkspaceRole` maps each role to a permission catalog (`members.invite`, `workspace.delete`, `ownership.transfer`…), overridable per role via `workspaces.role_permissions`. Server-enforced invariants: the owner can never be demoted or removed, `owner` is transfer-only, and transfers keep `owner_id` and the members table consistent.
+- `LaraSaaS\Support\WorkspaceManager` (validated writes, same pattern as `PlanManager`) plus facade helpers `createWorkspace()`, `inviteToWorkspace()`, `acceptWorkspaceInvitation()`, `workspacesFor()`.
+- JSON API for workspaces, members, invitations and ownership transfer under `route.api_prefix` (id **or** slug binding), with `larasaas.workspace`, `larasaas.workspace.can:` and `larasaas.workspace.role:` middleware aliases for host routes.
+- `php artisan larasaas:doctor` and `LaraSaaS::billingSchemaProblems()` — developer alerts for the billing schema.
+
+### Changed
+
+- **Cashier customer columns now follow the configured model.** The baseline migration adds `stripe_id`, `pm_type`, `pm_last_four` and `trial_ends_at` to the table of `larasaas.user_model` — or of `billing.workspace_model` (falling back to `workspaces.model`) when `billing.billable` is `workspace` — never to a hardcoded `users` table. The additions are idempotent (`hasColumn` guards) and `down()` never drops them from host tables. The stock Cashier `create_customer_columns` migration (which hardcodes `users`) is now skipped by `larasaas:install`; a host-owned copy published earlier is left untouched but flagged by the doctor when it targets the wrong table.
+- The baseline migration (same filename) additionally creates `larasaas_workspaces`, `larasaas_workspace_members` and `larasaas_workspace_invitations`. If you already ran the 3.0.0 baseline, apply the new `Schema::create` blocks with your own migration (the 3.x baseline was announced as unused; fresh installs are unaffected).
+- **Alerts when the configured model changes after migrating:** the columns stay on the previous table in that case — `larasaas:install` warns right after migrating, `larasaas:doctor` reports `⚠ CONFIG CHANGED?` with remediation steps, and the config file carries an explicit alert comment next to `user_model` / `billing.*`. See README "Changing the configured model".
+
+### Documentation
+
+- New README section "Multi-tenant Workspaces & Team Management" (schema, role/permission matrix, manager API, JSON endpoints, workspace billing) and "Changing the configured model".
+
 ## 3.0.0 — 2026-10-14
 
 ### Breaking changes

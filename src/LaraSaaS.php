@@ -253,6 +253,53 @@ class LaraSaaS
 
     /*
     |--------------------------------------------------------------------------
+    | Multi-tenant workspaces & team management
+    |--------------------------------------------------------------------------
+    */
+
+    /** @return class-string<\LaraSaaS\Models\Workspace> */
+    public function workspaceModel(): string
+    {
+        return app(\LaraSaaS\Support\WorkspaceManager::class)->workspaceModel();
+    }
+
+    /** @return \Illuminate\Support\Collection<int, \LaraSaaS\Models\Workspace> */
+    public function workspacesFor($user)
+    {
+        return $this->newWorkspaceModel()->newQuery()->visibleTo($user)->get();
+    }
+
+    public function newWorkspaceModel(): Model
+    {
+        $class = $this->workspaceModel();
+
+        return new $class;
+    }
+
+    /** Host controllers must authorize the caller before workspace/team writes. */
+    public function createWorkspace(array $attributes, $owner): \LaraSaaS\Models\Workspace
+    {
+        return app(\LaraSaaS\Support\WorkspaceManager::class)->create($attributes, $owner);
+    }
+
+    public function inviteToWorkspace(\LaraSaaS\Models\Workspace $workspace, string $email, string $role = 'member', $invitedBy = null): \LaraSaaS\Models\WorkspaceInvitation
+    {
+        return app(\LaraSaaS\Support\WorkspaceManager::class)->invite($workspace, $email, $role, $invitedBy);
+    }
+
+    public function acceptWorkspaceInvitation(string $token, $user): \LaraSaaS\Models\WorkspaceMember
+    {
+        return app(\LaraSaaS\Support\WorkspaceManager::class)->acceptByToken($token, $user);
+    }
+
+    /** @return array<int, string> Developer alerts — empty when the billing schema is healthy. */
+    public function billingSchemaProblems(): array
+    {
+        return app(\LaraSaaS\Support\BillingSchema::class)->problems();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Announcements
     |--------------------------------------------------------------------------
     */

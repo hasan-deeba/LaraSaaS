@@ -8,6 +8,7 @@
 - Developers own `config/larasaas.php` → `plan_features`: stable snake_case keys and boolean/integer/number definitions. Admins assign validated values through `createPlan`/`updatePlan` in the host dashboard (or the optional `Admin/Plans` page). `features` is the separate Pennant rollout catalog; it is not paid entitlement enforcement.
 - Plan keys/Stripe IDs are stable subscription identifiers. Archive, never erase, catalog rows. Archived plans cannot be purchased but still resolve existing subscriptions and entitlements. Features change for current subscribers when edited.
 - `LaraSaaS::allows()`/`entitlement()` are server checks on Cashier's current billable subscription, not quota usage counters. Host apps must use atomic accounting for concurrent usage.
+- Multi-tenant workspaces/team management ships first-party tables/models (`larasaas_workspaces`, `larasaas_workspace_members`, `larasaas_workspace_invitations`) with fixed roles Owner/Admin/Member mapped to a granular permission catalog (`LaraSaaS\Support\WorkspaceRole`, overridable via `workspaces.role_permissions`). The host user model opts into `LaraSaaS\Concerns\HasWorkspaces` — never add it automatically. Workspace writes live in `Support\WorkspaceManager`; host/API callers authorize, the manager enforces invariants (single owner, owner never demoted/removed, `owner` role is transfer-only). Invitations are e-mail-matched, token-based and expiring; the package sends no mail.
 
 ## Routing and security
 
@@ -19,14 +20,15 @@
 ## Migrations and upgrades
 
 - `database/migrations/2026_10_14_000000_create_larasaas_schema.php` is the only package migration. Define all LaraSaaS tables/columns directly in it for this unused baseline; do not restore legacy/additive migrations.
-- `larasaas:install` publishes the baseline without overwriting host files, including renamed timestamps. Migrations are not auto-loaded from vendor. Cashier retains its own migrations.
+- Cashier customer columns (`stripe_id`, `pm_type`, `pm_last_four`, `trial_ends_at`) are part of that baseline migration and MUST resolve the billable table from config (`larasaas.user_model`, or `billing.workspace_model`/`workspaces.model` when `billing.billable` is `workspace`) — never hardcode `users`. Add them idempotently (`hasColumn` guards) after the LaraSaaS tables exist; `down()` never drops them from host tables. `larasaas:install` skips the stock Cashier `create_customer_columns` migration (hardcoded `users`) and never touches a host-owned copy; `larasaas:doctor`/`BillingSchema` alert (including `⚠ CONFIG CHANGED?`) when the configured model changes after migrating.
+- `larasaas:install` publishes the baseline without overwriting host files, including renamed timestamps. Migrations are not auto-loaded from vendor. Cashier retains its subscription-table migrations.
 - No automatic upgrade from old split migrations is shipped. Never drop/recreate real host data. A future deployed-schema upgrade needs an explicit migration strategy.
-- Plan writes belong in `Support/PlanManager`, exposed by the manager/facade (`createPlan`, `updatePlan`, `archivePlan`). Reuse its validation in the optional admin UI; host controllers own authorization. Embeds are for customer pricing/billing, never admin forms.
+- Plan writes belong in `Support/PlanManager`, exposed by the manager/facade (`createPlan`, `updatePlan`, `archivePlan`). Reuse its validation in the optional admin UI; host controllers own authorization. Embeds are for customer pricing/billing, never admin forms. Workspace/team writes belong in `Support/WorkspaceManager` with the same rules.
 
 ## Verification
 
 - `composer install` then `vendor/bin/pest`; lint with `find src config routes database tests -name '*.php' -print0 | xargs -0 -n1 php -l`.
 - GitHub Actions runs the Laravel 10/11/12 matrix. All must pass before a release.
 - `npm ci` then `npm run typecheck:package` validates the shipped React source; demo checks are `npm run typecheck` and `npm run lint`.
-- Add regression tests for authorization, typed features, signed identity, entitlement lifecycle and single-schema installation/rollback and manager writes without package routes. Do not call live Stripe in tests.
+- Add regression tests for authorization, typed features, signed identity, entitlement lifecycle and single-schema installation/rollback and manager writes without package routes. Also cover the config-resolved customer columns (`user_model`/workspace tables, idempotence, doctor alerts on config change) and workspace/team rules (roles, invitations, single-owner invariants, API authorization). Do not call live Stripe in tests.
 - Update README, CHANGELOG, this guide and `.github/copilot-instructions.md` for architectural changes. Tag breaking changes as a major version. Git tags, not composer.json's version field, determine Composer releases.

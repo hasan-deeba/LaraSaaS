@@ -11,6 +11,14 @@ return [
     | password resets keep living in YOUR project — the kit simply resolves
     | the user (and optionally the workspace) models you point it to.
     |
+    | ⚠ ALERT — READ BEFORE CHANGING `user_model` (or `billing.*` below):
+    | The Cashier customer columns (stripe_id, pm_type, pm_last_four,
+    | trial_ends_at) are migrated onto the TABLE of the model configured
+    | HERE — never a hardcoded `users` table. Once migrations have run,
+    | changing this model moves the target table but NOT the columns that
+    | already exist: run `php artisan larasaas:doctor` right after any
+    | change to this config and follow its alerts (see README).
+    |
     */
 
     'user_model' => env('LARASAAS_USER_MODEL', 'App\\Models\\User'),
@@ -118,6 +126,12 @@ return [
     | resolver below, so each workspace gets its own subscription & portal.
     | The resolved model MUST use Laravel\Cashier\Billable (see README).
     |
+    | The Cashier customer columns are migrated onto the table of the model
+    | selected here (`user_model` for "user"; `workspace_model`, falling back
+    | to `workspaces.model`, for "workspace"). ⚠ Changing `billable` or the
+    | model after migrating leaves the columns on the old table — run
+    | `php artisan larasaas:doctor` and follow its alerts.
+    |
     */
 
     'billing' => [
@@ -128,6 +142,39 @@ return [
         'trial_days'           => 14,
         'allow_promotion_codes'=> true,
         'collect_tax_ids'      => false,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
+    | Multi-tenant Workspaces & Team Management
+    |--------------------------------------------------------------------------
+    |
+    | First-party workspace/team engine: organizations with members, granular
+    | workspace-level roles (Owner, Admin, Member) and a robust invitation
+    | lifecycle. Swap the models for your own if you need custom tables —
+    | anything Eloquent works as long as it keeps the shipped relations.
+    |
+    | Roles map to permission lists (see LaraSaaS\Support\WorkspaceRole).
+    | Override individual permissions here to loosen or tighten a role;
+    | `roles` restricts which roles may be assigned through the API.
+    |
+    */
+
+    'workspaces' => [
+        'model'           => env('LARASAAS_WORKSPACE_MODEL', \LaraSaaS\Models\Workspace::class),
+        'member_model'    => \LaraSaaS\Models\WorkspaceMember::class,
+        'invitation_model'=> \LaraSaaS\Models\WorkspaceInvitation::class,
+
+        // Roles that may be granted to members (ownership transfer is separate).
+        'assignable_roles' => ['admin', 'member'],
+
+        // Invitation lifecycle.
+        'invitation_ttl_days' => 7,
+        'invite_by_email'     => true, // invitations must match the invited e-mail
+
+        // Optional per-role permission overrides, e.g.:
+        // 'role_permissions' => ['member' => ['billing.manage']],
+        'role_permissions' => [],
     ],
 
     /*

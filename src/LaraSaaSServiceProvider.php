@@ -184,6 +184,11 @@ class LaraSaaSServiceProvider extends ServiceProvider
 
         $router->aliasMiddleware('larasaas.subscribed', EnsureSubscribed::class);
         $router->aliasMiddleware('larasaas.feature', RequireFeature::class);
+
+        // Multi-tenant workspaces: membership + granular role/permission checks.
+        $router->aliasMiddleware('larasaas.workspace', \LaraSaaS\Http\Middleware\EnsureWorkspaceMember::class);
+        $router->aliasMiddleware('larasaas.workspace.can', \LaraSaaS\Http\Middleware\EnsureWorkspacePermission::class);
+        $router->aliasMiddleware('larasaas.workspace.role', \LaraSaaS\Http\Middleware\EnsureWorkspacePermission::class);
     }
 
     protected function registerCommands(): void
@@ -191,6 +196,7 @@ class LaraSaaSServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 InstallCommand::class,
+                \LaraSaaS\Console\DoctorCommand::class,
             ]);
         }
     }
