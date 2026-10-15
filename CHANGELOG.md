@@ -2,25 +2,21 @@
 
 All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
-## 3.1.0 — 2026-10-15
+## 4.0.0 — 2026-10-15
+
+### Breaking changes
+
+- The Cashier customer columns (`stripe_id`, `pm_type`, `pm_last_four`, `trial_ends_at`) are now created by the LaraSaaS schema migration **on the table of the configured model** (`larasaas.user_model`, or the workspace model for workspace billing) — never on a hardcoded `users` table. The installer retires Cashier's stock `create_customer_columns` migration (it hardcodes `users` and is not idempotent) after confirmation. Existing installations keep their columns; new installations no longer depend on the Cashier copy.
+- The package ships a second, optional migration (`2026_10_14_000001_create_larasaas_workspaces_schema.php`) for the multi-tenant workspace/team schema. It is published only for multi-tenant installs (`larasaas:install --multi-tenant` or the interactive question). The baseline filename/schema is unchanged for existing installs.
 
 ### Added
 
-- **🏢 Multi-tenant Workspaces** — first-party `larasaas_workspaces` tables and models (swap-able via `workspaces.model` / `member_model` / `invitation_model`) so users can operate within parallel organizational structures. Opt in on your user model with `LaraSaaS\Concerns\HasWorkspaces` (`workspaces()`, `currentWorkspace()`, `switchWorkspace()`, `roleIn()`…).
-- **👥 Team Management** — robust invitation lifecycle (invite → e-mail-matched accept by 64-char token → expiry → resend/revoke, re-invite after removal) with granular workspace-level roles (Owner, Admin, Member). `WorkspaceRole` maps each role to a permission catalog (`members.invite`, `workspace.delete`, `ownership.transfer`…), overridable per role via `workspaces.role_permissions`. Server-enforced invariants: the owner can never be demoted or removed, `owner` is transfer-only, and transfers keep `owner_id` and the members table consistent.
-- `LaraSaaS\Support\WorkspaceManager` (validated writes, same pattern as `PlanManager`) plus facade helpers `createWorkspace()`, `inviteToWorkspace()`, `acceptWorkspaceInvitation()`, `workspacesFor()`.
-- JSON API for workspaces, members, invitations and ownership transfer under `route.api_prefix` (id **or** slug binding), with `larasaas.workspace`, `larasaas.workspace.can:` and `larasaas.workspace.role:` middleware aliases for host routes.
-- `php artisan larasaas:doctor` and `LaraSaaS::billingSchemaProblems()` — developer alerts for the billing schema.
-
-### Changed
-
-- **Cashier customer columns now follow the configured model.** The baseline migration adds `stripe_id`, `pm_type`, `pm_last_four` and `trial_ends_at` to the table of `larasaas.user_model` — or of `billing.workspace_model` (falling back to `workspaces.model`) when `billing.billable` is `workspace` — never to a hardcoded `users` table. The additions are idempotent (`hasColumn` guards) and `down()` never drops them from host tables. The stock Cashier `create_customer_columns` migration (which hardcodes `users`) is now skipped by `larasaas:install`; a host-owned copy published earlier is left untouched but flagged by the doctor when it targets the wrong table.
-- The baseline migration (same filename) additionally creates `larasaas_workspaces`, `larasaas_workspace_members` and `larasaas_workspace_invitations`. If you already ran the 3.0.0 baseline, apply the new `Schema::create` blocks with your own migration (the 3.x baseline was announced as unused; fresh installs are unaffected).
-- **Alerts when the configured model changes after migrating:** the columns stay on the previous table in that case — `larasaas:install` warns right after migrating, `larasaas:doctor` reports `⚠ CONFIG CHANGED?` with remediation steps, and the config file carries an explicit alert comment next to `user_model` / `billing.*`. See README "Changing the configured model".
-
-### Documentation
-
-- New README section "Multi-tenant Workspaces & Team Management" (schema, role/permission matrix, manager API, JSON endpoints, workspace billing) and "Changing the configured model".
+- **🏢 Multi-tenant Workspaces** — seamless workspace management allowing users to operate within parallel organizational structures. The `multi_tenant.enabled` / `LARASAAS_MULTI_TENANT` config switch makes the project multi-tenant (or keeps it single-tenant with zero workspace overhead): workspaces with unique slugs, per-user workspace lists and current-workspace resolution.
+- **👥 Team Management** — robust invitation system with granular workspace-level roles (Owner, Admin, Member): e-mail invitations with expiring tokens, accept/revoke flows, role changes with implications (`admin` implies `member`, configurable), and server-side safety rules (last-owner protection, Admins cannot touch Owners/Admins, owner-pointer reassignment). Manager/facade API (`createWorkspace`, `inviteMember`, `acceptInvitation`, `changeMemberRole`, `removeMember`, `hasWorkspaceRole`) plus JSON API and shipped Inertia pages (`/app/workspaces`, team management).
+- Workspace billing integration: with `billing.billable = workspace` and no custom resolver, the billable workspace is resolved from the team tables (most recently joined). Customer columns are created on the workspace model's table.
+- `php artisan larasaas:doctor` — setup drift detection with loud alerts: when the model in `larasaas.user_model` changes after migrating, it reports which table holds the billing columns and what to do (also surfaced at the end of `larasaas:install` and as a one-time boot log warning). Migrations stamp the model/table they built for in `larasaas_settings`.
+- `larasaas:install` asks whether the project is multi-tenant (`--multi-tenant` / `--no-multi-tenant`), writes `LARASAAS_MULTI_TENANT` to `.env`, and publishes the workspace schema only when needed.
+- Regression coverage for config-driven billable tables (custom user tables, workspace tables), model-change alerts, install idempotence/rollback, multi-tenant installs, the full invitation/role lifecycle, single-tenant route absence and workspace billing resolution.
 
 ## 3.0.0 — 2026-10-14
 

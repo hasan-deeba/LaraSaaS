@@ -3,52 +3,47 @@
 namespace LaraSaaS\Console;
 
 use Illuminate\Console\Command;
-use LaraSaaS\Support\BillingSchema;
+use LaraSaaS\Support\SetupDoctor;
 
 /**
- * Health-check for the billing schema configuration: verifies that the Cashier
- * customer columns live on the table of the model configured in
- * `larasaas.user_model` / `larasaas.billing.*`, and loudly alerts when that
- * model changed after the columns were migrated.
+ * `php artisan larasaas:doctor` — checks that config/larasaas.php and the
+ * database schema still agree, and shouts when they don't (for example when
+ * the model in `larasaas.user_model` was changed after migrating).
  */
 class DoctorCommand extends Command
 {
     protected $signature = 'larasaas:doctor';
 
-    protected $description = 'Check the LaraSaaS billing schema: alerts when the configured user/workspace model changed after migrating';
+    protected $description = 'Check the LaraSaaS setup: configured models, billable columns and multi-tenant schema, with loud alerts on config drift';
 
-    public function handle(BillingSchema $schema): int
+    public function handle(SetupDoctor $doctor): int
     {
-        $this->components->info('LaraSaaS doctor');
+        $this->components->info('LaraSaaS setup doctor');
 
-        try {
-            $this->components->twoColumnDetail('Billable model', '<fg=cyan>' . $schema->billableModel() . '</>');
-            $this->components->twoColumnDetail('Customer columns table', '<fg=cyan>' . $schema->billableTable() . '</>');
-        } catch (\RuntimeException $e) {
-            $this->components->error($e->getMessage());
+        $hasProblems = false;
 
-            return self::FAILURE;
-        }
+        foreach ($doctor->report() as $check) {
+            $status = match ($check['level']) {
+                'error'   => '<fg=red;options=bold>ERROR</>',
+                'warning' => '<fg=yellow;options=bold>WARN </>',
+                default   => '<fg=green>OK   </>',
+            };
 
-        $this->components->twoColumnDetail('Required columns', implode(', ', $schema->requiredColumns()));
+            if (! $check['ok']) {
+                $hasProblems = true;
+            }
 
-        $problems = $schema->problems();
-
-        if ($problems === []) {
-            $this->components->info('Billing schema OK — the Cashier columns match the configured model.');
-
-            return self::SUCCESS;
+            $this->line("  [{$status}] {$check['message']}");
         }
 
         $this->newLine();
 
-        foreach ($problems as $problem) {
-            $this->components->warn($problem);
+        if ($hasProblems) {
+            $this->components->warn('Some checks need your attention — fix them to keep billing and workspaces reliable.');
+        } else {
+            $this->components->info('Everything looks healthy.');
         }
 
-        $this->newLine();
-        $this->components->error('Found ' . count($problems) . ' problem(s). See the README sections "Cashier setup" and "Changing the configured model".');
-
-        return self::FAILURE;
+        return self::SUCCESS;
     }
 }

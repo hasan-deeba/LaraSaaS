@@ -2,8 +2,6 @@
 
 namespace LaraSaaS\Tests;
 
-require_once __DIR__ . '/Fixtures/HostUserModel.php';
-
 use LaraSaaS\LaraSaaSServiceProvider;
 use Laravel\Cashier\CashierServiceProvider;
 use Laravel\Pennant\PennantServiceProvider;

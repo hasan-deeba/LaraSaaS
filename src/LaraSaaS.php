@@ -9,6 +9,7 @@ use Illuminate\Support\Facades\URL;
 use LaraSaaS\Models\Plan;
 use LaraSaaS\Support\PlanFeatures;
 use LaraSaaS\Support\PlanManager;
+use LaraSaaS\Support\WorkspaceManager;
 use Laravel\Cashier\Billable;
 use LogicException;
 
@@ -80,6 +81,11 @@ class LaraSaaS
             if (method_exists($user, 'currentWorkspace')) {
                 return $this->ensureBillable($user->currentWorkspace());
             }
+
+            // Multi-tenant default: the workspace the user joined most recently.
+            if ($this->multiTenant()) {
+                return $this->ensureBillable($this->currentWorkspaceFor($user));
+            }
         }
 
         return $this->ensureBillable($user);
@@ -102,11 +108,120 @@ class LaraSaaS
 
     public function billableType(): string
     {
-        if (config('larasaas.billing.billable') === 'workspace' && config('larasaas.billing.workspace_model')) {
-            return (string) config('larasaas.billing.workspace_model');
+        if (config('larasaas.billing.billable') === 'workspace') {
+            return (string) (config('larasaas.billing.workspace_model') ?: $this->workspaceModel());
         }
 
         return $this->userModel();
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Multi-tenant Workspaces & Team Management
+    |--------------------------------------------------------------------------
+    */
+
+    /** Is this project multi-tenant? Chosen by the host in config. */
+    public function multiTenant(): bool
+    {
+        return (bool) config('larasaas.multi_tenant.enabled');
+    }
+
+    public function workspaceModel(): string
+    {
+        return config('larasaas.multi_tenant.workspace_model')
+            ?: \LaraSaaS\Models\Workspace::class;
+    }
+
+    public function membershipModel(): string
+    {
+        return config('larasaas.multi_tenant.membership_model')
+            ?: \LaraSaaS\Models\WorkspaceMember::class;
+    }
+
+    public function invitationModel(): string
+    {
+        return config('larasaas.multi_tenant.invitation_model')
+            ?: \LaraSaaS\Models\WorkspaceInvitation::class;
+    }
+
+    /** Granular workspace-level roles and their implications (Owner > Admin > Member). */
+    public function roleDefinitions(): array
+    {
+        return config('larasaas.multi_tenant.roles', []);
+    }
+
+    /** Create a workspace; the owner immediately receives the Owner role. */
+    public function createWorkspace($owner, array $attributes = []): Model
+    {
+        return app(WorkspaceManager::class)->createWorkspace($owner, $attributes);
+    }
+
+    /** Every workspace the given user belongs to. */
+    public function workspacesFor($user): \Illuminate\Support\Collection
+    {
+        return app(WorkspaceManager::class)->workspacesFor($user);
+    }
+
+    /** The user's current workspace (most recently joined), if any. */
+    public function currentWorkspaceFor($user): ?Model
+    {
+        return app(WorkspaceManager::class)->currentWorkspaceFor($user);
+    }
+
+    public function workspaceMembers(Model $workspace): \Illuminate\Support\Collection
+    {
+        return app(WorkspaceManager::class)->members($workspace);
+    }
+
+    public function workspaceInvitations(Model $workspace): \Illuminate\Support\Collection
+    {
+        return app(WorkspaceManager::class)->invitations($workspace);
+    }
+
+    /** Invite an e-mail to the workspace with a granular role (Owner, Admin, Member). */
+    public function inviteMember(Model $workspace, $inviter, string $email, ?string $role = null): Model
+    {
+        return app(WorkspaceManager::class)->invite($workspace, $inviter, $email, $role);
+    }
+
+    /** Accept a pending invitation (pass the model or its token string). */
+    public function acceptInvitation($invitation, $user): Model
+    {
+        if (! $invitation instanceof Model) {
+            $invitation = app(WorkspaceManager::class)->invitationClass()::query()
+                ->where('token', (string) $invitation)
+                ->first();
+
+            if (! $invitation) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'invitation' => 'This invitation link is invalid.',
+                ]);
+            }
+        }
+
+        return app(WorkspaceManager::class)->acceptInvitation($invitation, $user);
+    }
+
+    public function revokeInvitation(Model $workspace, $actor, Model $invitation): void
+    {
+        app(WorkspaceManager::class)->revokeInvitation($workspace, $actor, $invitation);
+    }
+
+    public function changeMemberRole(Model $workspace, $actor, $user, string $role): Model
+    {
+        return app(WorkspaceManager::class)->changeRole($workspace, $actor, $user, $role);
+    }
+
+    public function removeMember(Model $workspace, $actor, $user): void
+    {
+        app(WorkspaceManager::class)->removeMember($workspace, $actor, $user);
+    }
+
+    /** Does the user hold one of these workspace roles? */
+    public function hasWorkspaceRole(Model $workspace, $user, string|array $roles): bool
+    {
+        return app(WorkspaceManager::class)->hasRole($workspace, $user, $roles);
     }
 
     /*
@@ -249,53 +364,6 @@ class LaraSaaS
 
         return $value !== null && is_finite($usage) && $usage >= 0
             && ($value == -1 || ($value > 0 && $usage <= $value));
-    }
-
-    /*
-    |--------------------------------------------------------------------------
-    | Multi-tenant workspaces & team management
-    |--------------------------------------------------------------------------
-    */
-
-    /** @return class-string<\LaraSaaS\Models\Workspace> */
-    public function workspaceModel(): string
-    {
-        return app(\LaraSaaS\Support\WorkspaceManager::class)->workspaceModel();
-    }
-
-    /** @return \Illuminate\Support\Collection<int, \LaraSaaS\Models\Workspace> */
-    public function workspacesFor($user)
-    {
-        return $this->newWorkspaceModel()->newQuery()->visibleTo($user)->get();
-    }
-
-    public function newWorkspaceModel(): Model
-    {
-        $class = $this->workspaceModel();
-
-        return new $class;
-    }
-
-    /** Host controllers must authorize the caller before workspace/team writes. */
-    public function createWorkspace(array $attributes, $owner): \LaraSaaS\Models\Workspace
-    {
-        return app(\LaraSaaS\Support\WorkspaceManager::class)->create($attributes, $owner);
-    }
-
-    public function inviteToWorkspace(\LaraSaaS\Models\Workspace $workspace, string $email, string $role = 'member', $invitedBy = null): \LaraSaaS\Models\WorkspaceInvitation
-    {
-        return app(\LaraSaaS\Support\WorkspaceManager::class)->invite($workspace, $email, $role, $invitedBy);
-    }
-
-    public function acceptWorkspaceInvitation(string $token, $user): \LaraSaaS\Models\WorkspaceMember
-    {
-        return app(\LaraSaaS\Support\WorkspaceManager::class)->acceptByToken($token, $user);
-    }
-
-    /** @return array<int, string> Developer alerts — empty when the billing schema is healthy. */
-    public function billingSchemaProblems(): array
-    {
-        return app(\LaraSaaS\Support\BillingSchema::class)->problems();
     }
 
     /*

@@ -29,12 +29,12 @@ class PlansTest extends TestCase
 
     protected function defineDatabaseMigrations(): void
     {
-        (require __DIR__ . '/../database/migrations/2026_10_14_000000_create_larasaas_schema.php')->up();
         Schema::create('users', function (Blueprint $table) {
             $table->id();
             $table->string('email');
             $table->timestamps();
         });
+        (require __DIR__ . '/../database/migrations/2026_10_14_000000_create_larasaas_schema.php')->up();
     }
 
     private function payload(array $overrides = []): array

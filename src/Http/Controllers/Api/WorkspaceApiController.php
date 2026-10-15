@@ -2,189 +2,192 @@
 
 namespace LaraSaaS\Http\Controllers\Api;
 
-use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\JsonResponse;
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use LaraSaaS\Http\Controllers\Concerns\ResolvesWorkspaces;
 use LaraSaaS\LaraSaaS;
-use LaraSaaS\Models\Workspace;
-use LaraSaaS\Models\WorkspaceInvitation;
 use LaraSaaS\Support\WorkspaceManager;
+use LaraSaaS\Support\WorkspacePresenter;
 
 /**
- * Multi-tenant workspaces & team management (`api` / `inertia` / `embed`
- * modes). Every response uses the package's `{"data": …}` envelope; role-based
- * authorization rides on `larasaas.workspace.*` middleware, while the
- * WorkspaceManager enforces the structural invariants (single owner, role
- * sanity, invitation lifecycle).
+ * Headless workspace & team surface — parallel workspaces, granular
+ * workspace-level roles (Owner, Admin, Member) and the invitation system,
+ * for React SPAs on other servers, Flutter/native apps, or any client.
+ * Responses use the standard `{"data": …}` envelope.
  */
 class WorkspaceApiController extends Controller
 {
-    public function __construct(protected WorkspaceManager $workspaces) {}
+    use ResolvesWorkspaces;
 
-    /** Workspaces the authenticated user belongs to. */
+    public function __construct(
+        protected LaraSaaS $larasaas,
+        protected WorkspaceManager $manager,
+        protected WorkspacePresenter $presenter,
+    ) {}
+
+    /** GET — every workspace the authenticated user belongs to. */
     public function index(Request $request): JsonResponse
     {
         $user = $request->user();
 
-        $data = $this->workspaces->workspaceModel()::query()
-            ->visibleTo($user)
-            ->orderBy($this->workspaces->workspaceTable() . '.id')
-            ->get()
-            ->map(function (Workspace $workspace) use ($user) {
-                $role = $workspace->roleFor($user);
-
-                return array_merge($workspace->toUiArray(), [
-                    'role' => $role?->value,
-                    'role_label' => $role?->label(),
-                    'permissions' => $role?->permissions() ?? [],
-                ]);
-            })
-            ->all();
-
-        return response()->json(['data' => $data]);
+        return response()->json([
+            'data' => $this->manager->workspacesFor($user)
+                ->map(fn ($workspace) => $this->presenter->summary($workspace, $user))
+                ->values()
+                ->all(),
+        ]);
     }
 
-    /** Create a workspace — the caller becomes its Owner. */
+    /** POST — create a workspace (creator becomes Owner). Body: name, slug? */
     public function store(Request $request): JsonResponse
     {
-        $workspace = $this->workspaces->create($request->all(), $request->user());
+        $request->validate([
+            'name' => ['required', 'string', 'max:140'],
+            'slug' => ['nullable', 'string', 'max:160', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/'],
+        ]);
+
+        $workspace = $this->larasaas->createWorkspace($request->user(), $request->only(['name', 'slug']));
 
         return response()->json([
-            'data' => array_merge($workspace->fresh()->toUiArray(), [
-                'role' => 'owner',
-                'role_label' => 'Owner',
-            ]),
+            'data' => $this->presenter->summary($workspace, $request->user()),
         ], 201);
     }
 
-    /** Workspace + team roster (+ pending invitations for those who may see them). */
-    public function show(Request $request, Workspace $workspace): JsonResponse
+    /** GET — workspace detail with members (and invitations for managers). */
+    public function show(Request $request, string $workspace): JsonResponse
     {
-        $role = $workspace->roleFor($request->user());
+        $workspace = $this->findWorkspace($workspace);
+        $user = $request->user();
 
-        $data = array_merge($workspace->toUiArray(), [
-            'role' => $role?->value,
-            'role_label' => $role?->label(),
-            'permissions' => $role?->permissions() ?? [],
-            'members' => $workspace->members()->orderBy('id')->get()->map->toUiArray()->all(),
+        $this->authorizeMember($workspace, $user);
+
+        $canManage = $this->manager->hasRole($workspace, $user, ['owner', 'admin']);
+
+        return response()->json([
+            'data' => array_merge($this->presenter->summary($workspace, $user), [
+                'members' => $this->manager->members($workspace)
+                    ->map(fn ($member) => $this->presenter->member($member))
+                    ->values()
+                    ->all(),
+                'invitations' => $canManage
+                    ? $this->manager->invitations($workspace)
+                        ->map(fn ($invitation) => $this->presenter->invitation($invitation))
+                        ->values()
+                        ->all()
+                    : [],
+                'can_manage' => $canManage,
+                'is_owner' => $this->manager->hasRole($workspace, $user, 'owner'),
+            ]),
         ]);
-
-        if ($role?->allows('invitations.view')) {
-            $data['invitations'] = $workspace->invitations()->orderBy('id')->get()->map->toUiArray()->all();
-        }
-
-        return response()->json(['data' => $data]);
     }
 
-    /** Rename the workspace / change its slug (permission: workspace.update). */
-    public function update(Request $request, Workspace $workspace): JsonResponse
+    /** GET — workspace members with their granular roles. */
+    public function members(Request $request, string $workspace): JsonResponse
     {
-        $workspace = $this->workspaces->update($workspace, $request->all());
+        $workspace = $this->findWorkspace($workspace);
 
-        return response()->json(['data' => $workspace->toUiArray()]);
+        $this->authorizeMember($workspace, $request->user());
+
+        return response()->json([
+            'data' => $this->manager->members($workspace)
+                ->map(fn ($member) => $this->presenter->member($member))
+                ->values()
+                ->all(),
+        ]);
     }
 
-    /** Delete the workspace and its team (permission: workspace.delete — Owner). */
-    public function destroy(Workspace $workspace): JsonResponse
+    /** POST — invite an e-mail address. Body: email, role? (owner|admin|member) */
+    public function invite(Request $request, string $workspace): JsonResponse
     {
-        $this->workspaces->delete($workspace);
+        $workspace = $this->findWorkspace($workspace);
 
-        return response()->json(['data' => ['deleted' => true]]);
-    }
-
-    /*
-    |----------------------------------------------------------------------
-    | Team management
-    |----------------------------------------------------------------------
-    */
-
-    /** Invite an e-mail with a granular role (permission: members.invite). */
-    public function invite(Request $request, Workspace $workspace): JsonResponse
-    {
         $request->validate([
             'email' => ['required', 'email', 'max:190'],
-            'role' => ['nullable', 'string'],
+            'role'  => ['nullable', 'string', 'in:' . implode(',', array_keys($this->larasaas->roleDefinitions()))],
         ]);
 
-        $invitation = $this->workspaces->invite(
-            $workspace,
-            (string) $request->input('email'),
-            (string) ($request->input('role') ?: 'member'),
-            $request->user(),
-        );
+        $invitation = $this->larasaas->inviteMember($workspace, $request->user(), $request->input('email'), $request->input('role'));
 
-        return response()->json(['data' => $invitation->toUiArray()], 201);
-    }
-
-    /** Pending invitations (permission: invitations.view). */
-    public function invitations(Workspace $workspace): JsonResponse
-    {
         return response()->json([
-            'data' => $workspace->invitations()->orderBy('id')->get()->map->toUiArray()->all(),
+            'data' => $this->presenter->invitation($invitation),
+        ], 201);
+    }
+
+    /** GET — pending/known invitations (Owners and Admins). */
+    public function invitations(Request $request, string $workspace): JsonResponse
+    {
+        $workspace = $this->findWorkspace($workspace);
+
+        abort_unless($this->manager->hasRole($workspace, $request->user(), ['owner', 'admin']), 403);
+
+        return response()->json([
+            'data' => $this->manager->invitations($workspace)
+                ->map(fn ($invitation) => $this->presenter->invitation($invitation))
+                ->values()
+                ->all(),
         ]);
     }
 
-    /** Revoke a pending invitation (permission: invitations.manage). */
-    public function revokeInvitation(Workspace $workspace, WorkspaceInvitation $invitation): JsonResponse
+    /** DELETE — revoke a pending invitation. */
+    public function revokeInvitation(Request $request, string $workspace, string $invitation): JsonResponse
     {
-        abort_unless((int) $invitation->workspace_id === (int) $workspace->getKey(), 404);
+        $workspace = $this->findWorkspace($workspace);
+        $invitation = $this->findInvitation($invitation);
 
-        $this->workspaces->cancelInvitation($invitation);
+        $this->larasaas->revokeInvitation($workspace, $request->user(), $invitation);
 
         return response()->json(['data' => ['revoked' => true]]);
     }
 
-    /** Accept an invitation by token — the signed-in user joins the team. */
-    public function acceptInvitation(Request $request, string $token): JsonResponse
+    /** PUT — change a member's role (Owner only). Body: role */
+    public function changeRole(Request $request, string $workspace, string $user): JsonResponse
     {
-        $member = $this->workspaces->acceptByToken($token, $request->user());
+        $workspace = $this->findWorkspace($workspace);
+        $target = $this->findWorkspaceUser($user);
 
-        return response()->json(['data' => $member->toUiArray()]);
+        $request->validate([
+            'role' => ['required', 'string', 'in:' . implode(',', array_keys($this->larasaas->roleDefinitions()))],
+        ]);
+
+        $member = $this->larasaas->changeMemberRole($workspace, $request->user(), $target, $request->input('role'));
+
+        return response()->json([
+            'data' => $this->presenter->member($member),
+        ]);
     }
 
-    /** Change a member's role (permission: members.update). Owner is transfer-only. */
-    public function updateMemberRole(Request $request, Workspace $workspace, string $member): JsonResponse
+    /** DELETE — remove a member from the workspace. */
+    public function removeMember(Request $request, string $workspace, string $user): JsonResponse
     {
-        $request->validate(['role' => ['required', 'string']]);
+        $workspace = $this->findWorkspace($workspace);
+        $target = $this->findWorkspaceUser($user);
 
-        $membership = $this->workspaces->updateMemberRole(
-            $workspace,
-            $this->resolveMember($workspace, $member),
-            (string) $request->input('role'),
-        );
-
-        return response()->json(['data' => $membership->toUiArray()]);
-    }
-
-    /** Remove a member (permission: members.remove). The Owner can never be removed. */
-    public function removeMember(Workspace $workspace, string $member): JsonResponse
-    {
-        $this->workspaces->removeMember($workspace, $this->resolveMember($workspace, $member));
+        $this->larasaas->removeMember($workspace, $request->user(), $target);
 
         return response()->json(['data' => ['removed' => true]]);
     }
 
-    /** Hand the workspace to another member (permission: ownership.transfer). */
-    public function transferOwnership(Request $request, Workspace $workspace): JsonResponse
+    /** GET — preview an invitation by its token. */
+    public function showInvitation(Request $request, string $token): JsonResponse
     {
-        $request->validate(['user_id' => ['required', 'integer']]);
+        $invitation = app(LaraSaaS::class)->invitationModel()::query()->where('token', $token)->first();
+        abort_unless($invitation, 404);
 
-        $workspace = $this->workspaces->transferOwnership(
-            $workspace,
-            $this->resolveMember($workspace, (string) $request->input('user_id')),
-        );
-
-        return response()->json(['data' => $workspace->toUiArray()]);
+        return response()->json([
+            'data' => array_merge($this->presenter->invitation($invitation), [
+                'workspace' => $this->presenter->summary($invitation->workspace),
+            ]),
+        ]);
     }
 
-    /** The member route parameter is the host user id of the member. */
-    protected function resolveMember(Workspace $workspace, string $userId): Model
+    /** POST — accept an invitation and join the workspace. */
+    public function acceptInvitation(Request $request, string $token): JsonResponse
     {
-        $user = app(LaraSaaS::class)->newUserModel()->newQuery()->find($userId);
+        $member = $this->larasaas->acceptInvitation($token, $request->user());
 
-        abort_unless($user !== null && $workspace->hasMember($user), 404);
-
-        return $user;
+        return response()->json([
+            'data' => $this->presenter->member($member),
+        ], 201);
     }
 }

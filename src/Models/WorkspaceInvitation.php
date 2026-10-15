@@ -4,13 +4,10 @@ namespace LaraSaaS\Models;
 
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
-use Illuminate\Support\Facades\URL;
-use LaraSaaS\Support\WorkspaceRole;
 
 /**
- * A pending team invitation: e-mail + workspace-level role + single-use-ish
- * token with expiry. Accepting creates the membership and stamps
- * `accepted_at`; the same e-mail can be re-invited afterwards.
+ * A pending team invitation: an e-mail address invited to join a workspace
+ * with a specific role. Swap this class via `multi_tenant.invitation_model`.
  */
 class WorkspaceInvitation extends Model
 {
@@ -19,31 +16,24 @@ class WorkspaceInvitation extends Model
     protected $guarded = ['id'];
 
     protected $casts = [
-        'workspace_id' => 'integer',
-        'invited_by' => 'integer',
-        'expires_at' => 'datetime',
+        'expires_at'  => 'datetime',
         'accepted_at' => 'datetime',
     ];
 
     public function workspace(): BelongsTo
     {
-        return $this->belongsTo(config('larasaas.workspaces.model', Workspace::class), 'workspace_id');
+        return $this->belongsTo(config('larasaas.multi_tenant.workspace_model', Workspace::class), 'workspace_id');
     }
 
-    /** Points at whatever model the HOST project configured — never a hardcoded App\Models\User. */
-    public function invitedBy(): BelongsTo
+    /** The user who sent the invitation (configured user model). */
+    public function inviter(): BelongsTo
     {
         return $this->belongsTo(config('larasaas.user_model', 'App\\Models\\User'), 'invited_by');
     }
 
-    public function roleEnum(): WorkspaceRole
+    public function isPending(): bool
     {
-        return WorkspaceRole::tryFromLoose((string) $this->role) ?? WorkspaceRole::Member;
-    }
-
-    public function isAccepted(): bool
-    {
-        return $this->accepted_at !== null;
+        return $this->accepted_at === null && ! $this->isExpired();
     }
 
     public function isExpired(): bool
@@ -51,37 +41,8 @@ class WorkspaceInvitation extends Model
         return $this->expires_at !== null && $this->expires_at->isPast();
     }
 
-    public function isPending(): bool
+    public function isAccepted(): bool
     {
-        return ! $this->isAccepted() && ! $this->isExpired();
-    }
-
-    /**
-     * URL guests can be mailed: hits the authenticated API endpoint that
-     * accepts the invitation for the signed-in user.
-     */
-    public function acceptUrl(): string
-    {
-        return URL::to('/' . trim(config('larasaas.route.api_prefix', 'api/larasaas'), '/')
-            . '/workspaces/invitations/' . $this->token . '/accept');
-    }
-
-    /** Shape consumed by API clients / React pages. */
-    public function toUiArray(): array
-    {
-        return [
-            'id' => $this->id,
-            'workspace_id' => $this->workspace_id,
-            'email' => $this->email,
-            'role' => $this->roleEnum()->value,
-            'role_label' => $this->roleEnum()->label(),
-            'token' => $this->token,
-            'accept_url' => $this->acceptUrl(),
-            'invited_by' => $this->invited_by,
-            'expires_at' => $this->expires_at?->toIso8601String(),
-            'accepted_at' => $this->accepted_at?->toIso8601String(),
-            'pending' => $this->isPending(),
-            'created_at' => $this->created_at?->toIso8601String(),
-        ];
+        return $this->accepted_at !== null;
     }
 }

@@ -2,354 +2,362 @@
 
 namespace LaraSaaS\Support;
 
+use Illuminate\Auth\Access\AuthorizationException;
 use Illuminate\Database\Eloquent\Model;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\DB;
-use Illuminate\Support\Facades\Validator;
 use Illuminate\Support\Str;
-use Illuminate\Validation\Rule;
 use Illuminate\Validation\ValidationException;
 use LaraSaaS\Models\Workspace;
 use LaraSaaS\Models\WorkspaceInvitation;
 use LaraSaaS\Models\WorkspaceMember;
 
 /**
- * Validated multi-tenant workspace & team management for any host dashboard,
- * command or API route. The caller owns authorization; this service enforces
- * the structural invariants (single owner, role sanity, invitation lifecycle).
+ * Multi-tenant workspace & team management: workspaces, granular
+ * workspace-level roles (Owner, Admin, Member) and the invitation system.
+ *
+ * Role rules are domain rules and enforced here; the caller still owns
+ * authentication (who is logged in) and any extra host policies.
  */
 class WorkspaceManager
 {
-    /*
-    |------------------------------------------------------------------
-    | Workspaces
-    |------------------------------------------------------------------
-    */
+    /* Model resolution — every class is host-swappable via config. */
 
-    /**
-     * Create a workspace owned by `$owner` (the host user model) and enroll
-     * the owner as the single `owner` member in the same transaction.
-     */
-    public function create(array $attributes, Model $owner): Workspace
+    public function workspaceClass(): string
     {
-        $attributes = $this->validated($attributes, [
+        return config('larasaas.multi_tenant.workspace_model') ?: Workspace::class;
+    }
+
+    public function membershipClass(): string
+    {
+        return config('larasaas.multi_tenant.membership_model') ?: WorkspaceMember::class;
+    }
+
+    public function invitationClass(): string
+    {
+        return config('larasaas.multi_tenant.invitation_model') ?: WorkspaceInvitation::class;
+    }
+
+    public function roles(): array
+    {
+        return array_keys(config('larasaas.multi_tenant.roles', []));
+    }
+
+    /* Reads */
+
+    public function members(Model $workspace): Collection
+    {
+        return $workspace->members()->orderBy('role')->orderBy('id')->get();
+    }
+
+    public function invitations(Model $workspace): Collection
+    {
+        return $workspace->invitations()->orderBy('id')->get();
+    }
+
+    public function memberFor(Model $workspace, $user): ?WorkspaceMember
+    {
+        if ($user === null) {
+            return null;
+        }
+
+        /** @var WorkspaceMember|null $member */
+        $member = $workspace->members()->where('user_id', $user->getKey())->first();
+
+        return $member;
+    }
+
+    /** Does the user hold one of the given roles on this workspace? */
+    public function hasRole(Model $workspace, $user, string|array $roles): bool
+    {
+        return (bool) $this->memberFor($workspace, $user)?->hasRole($roles);
+    }
+
+    /** All workspaces the user belongs to. */
+    public function workspacesFor($user): Collection
+    {
+        $workspaceIds = $this->membershipClass()::query()
+            ->where('user_id', $user->getKey())
+            ->pluck('workspace_id');
+
+        /** @var Collection<int, Model> $workspaces */
+        $workspaces = $this->workspaceClass()::query()
+            ->whereIn('id', $workspaceIds)
+            ->orderBy('name')
+            ->get();
+
+        return $workspaces;
+    }
+
+    /** The user's current workspace — the one joined most recently. */
+    public function currentWorkspaceFor($user): ?Model
+    {
+        $membership = $this->membershipClass()::query()
+            ->where('user_id', $user->getKey())
+            ->orderByDesc('id')
+            ->first();
+
+        if (! $membership) {
+            return null;
+        }
+
+        return $this->workspaceClass()::query()->find($membership->workspace_id);
+    }
+
+    /* Writes */
+
+    /** Create a workspace owned by the given user (who becomes its Owner). */
+    public function createWorkspace($owner, array $attributes = []): Model
+    {
+        $data = \Illuminate\Support\Facades\Validator::make($attributes, [
             'name' => ['required', 'string', 'max:140'],
-            'slug' => ['nullable', 'string', 'max:140', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique($this->workspaceTable(), 'slug')],
-        ]);
+            'slug' => ['nullable', 'string', 'max:160', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/'],
+        ])->validate();
 
-        return DB::transaction(function () use ($attributes, $owner) {
-            $workspace = new ($this->workspaceModel())($attributes);
-            $workspace->slug = $attributes['slug'] ?? $this->uniqueSlug($attributes['name']);
-            $workspace->owner_id = $owner->getAuthIdentifier();
-            $workspace->save();
+        $workspaceClass = $this->workspaceClass();
 
-            $this->membershipModel()::create([
+        return DB::transaction(function () use ($workspaceClass, $data, $owner) {
+            /** @var Model $workspace */
+            $workspace = new $workspaceClass;
+            $workspace->forceFill([
+                'name' => $data['name'],
+                'slug' => $this->uniqueSlug($workspaceClass, $data['slug'] ?? Str::slug($data['name'])),
+                'owner_id' => $owner->getKey(),
+            ])->save();
+
+            $this->membershipClass()::query()->create([
                 'workspace_id' => $workspace->getKey(),
-                'user_id' => $owner->getAuthIdentifier(),
-                'role' => WorkspaceRole::Owner->value,
+                'user_id' => $owner->getKey(),
+                'role' => WorkspaceMember::ROLE_OWNER,
             ]);
 
             return $workspace;
         });
     }
 
-    /** Omitted fields are preserved. */
-    public function update(Workspace $workspace, array $attributes): Workspace
-    {
-        $attributes = $this->validated($attributes, [
-            'name' => ['sometimes', 'required', 'string', 'max:140'],
-            'slug' => ['sometimes', 'required', 'string', 'max:140', 'regex:/^[a-z0-9]+(?:-[a-z0-9]+)*$/', Rule::unique($this->workspaceTable(), 'slug')->ignore($workspace->getKey())],
-        ]);
-
-        $workspace->fill($attributes);
-        $workspace->save();
-
-        return $workspace->refresh();
-    }
-
-    /** Members and invitations cascade in the database. */
-    public function delete(Workspace $workspace): void
-    {
-        $workspace->delete();
-    }
-
-    /*
-    |------------------------------------------------------------------
-    | Team management — roles
-    |------------------------------------------------------------------
-    */
-
     /**
-     * Change a member's role. "owner" cannot be assigned here — use
-     * transferOwnership() — and the current owner can never be demoted.
+     * Invite an e-mail address to join a workspace with a granular role.
+     * Owners may assign any role; Admins may assign Admin/Member but never
+     * Owner; Members may not invite at all.
      */
-    public function updateMemberRole(Workspace $workspace, Model $user, string $role): WorkspaceMember
+    public function invite(Model $workspace, $inviter, string $email, ?string $role = null): WorkspaceInvitation
     {
-        $role = WorkspaceRole::tryFromLoose($role) ?? throw ValidationException::withMessages([
-            'role' => 'The selected role is invalid. Expected one of: ' . implode(', ', array_map(
-                fn (WorkspaceRole $r) => $r->value,
-                WorkspaceRole::assignable(),
-            )) . '.',
-        ]);
+        $role = $role ?: config('larasaas.multi_tenant.default_role', WorkspaceMember::ROLE_MEMBER);
 
-        if (! in_array($role, WorkspaceRole::assignable(), true)) {
-            throw ValidationException::withMessages([
-                'role' => "The role [{$role->value}] cannot be assigned to members. Ownership is transferred separately.",
-            ]);
+        if (! in_array($role, $this->roles(), true)) {
+            throw ValidationException::withMessages(['role' => "Unknown workspace role [{$role}]."]);
         }
 
-        $member = $this->requireMember($workspace, $user);
+        $this->guardCanAssign($workspace, $inviter, $role);
 
-        if ($member->isOwner()) {
-            throw ValidationException::withMessages([
-                'role' => 'The workspace owner cannot be demoted. Transfer ownership first.',
-            ]);
+        $email = strtolower(trim($email));
+
+        $existingUser = $this->findUserByEmail($email);
+
+        if ($existingUser && $this->memberFor($workspace, $existingUser)) {
+            throw ValidationException::withMessages(['email' => 'This user is already a member of the workspace.']);
         }
 
-        $member->role = $role->value;
-        $member->save();
+        $invitationClass = $this->invitationClass();
 
-        return $member->refresh();
-    }
-
-    /** The owner can never be removed — transfer ownership first. */
-    public function removeMember(Workspace $workspace, Model $user): void
-    {
-        $member = $this->requireMember($workspace, $user);
-
-        if ($member->isOwner() || (int) $workspace->owner_id === (int) $user->getAuthIdentifier()) {
-            throw ValidationException::withMessages([
-                'user' => 'The workspace owner cannot be removed. Transfer ownership first.',
-            ]);
-        }
-
-        $member->delete();
-    }
-
-    /**
-     * Move ownership to another member (or an invited user — they are
-     * enrolled first). The previous owner keeps access as an admin.
-     */
-    public function transferOwnership(Workspace $workspace, Model $user): Workspace
-    {
-        return DB::transaction(function () use ($workspace, $user) {
-            $member = $workspace->members()->where('user_id', $user->getAuthIdentifier())->first()
-                ?? $this->membershipModel()::create([
-                    'workspace_id' => $workspace->getKey(),
-                    'user_id' => $user->getAuthIdentifier(),
-                    'role' => WorkspaceRole::Admin->value,
-                ]);
-
-            $previousOwner = $workspace->owner_id;
-
-            $member->role = WorkspaceRole::Owner->value;
-            $member->save();
-
-            if ($previousOwner !== null && (int) $previousOwner !== (int) $user->getAuthIdentifier()) {
-                $this->membershipModel()::query()
-                    ->where('workspace_id', $workspace->getKey())
-                    ->where('user_id', $previousOwner)
-                    ->update(['role' => WorkspaceRole::Admin->value]);
-            }
-
-            $workspace->owner_id = $user->getAuthIdentifier();
-            $workspace->save();
-
-            return $workspace->refresh();
-        });
-    }
-
-    /*
-    |------------------------------------------------------------------
-    | Team management — invitations
-    |------------------------------------------------------------------
-    */
-
-    /**
-     * Invite an e-mail with an assignable role. Re-inviting a pending e-mail
-     * resends (new token + fresh expiry); an accepted invitation is cleared
-     * so the e-mail can be re-invited after a member was removed.
-     */
-    public function invite(Workspace $workspace, string $email, string $role = 'member', ?Model $invitedBy = null): WorkspaceInvitation
-    {
-        $data = $this->validated(['email' => $email, 'role' => $role], [
-            'email' => ['required', 'email', 'max:190'],
-            'role' => ['required', 'string', 'in:' . implode(',', array_map(
-                fn (WorkspaceRole $r) => $r->value,
-                WorkspaceRole::assignable(),
-            ))],
-        ]);
-
-        $email = strtolower($data['email']);
-
-        if ($workspace->members()->whereHas('user', fn ($q) => $q->whereRaw('lower(email) = ?', [$email]))->exists()) {
-            throw ValidationException::withMessages([
-                'email' => 'This person is already a member of the workspace.',
-            ]);
-        }
-
-        $invitation = $this->invitationModel()::query()
+        if ($invitationClass::query()
             ->where('workspace_id', $workspace->getKey())
             ->whereRaw('lower(email) = ?', [$email])
-            ->first();
-
-        if ($invitation === null) {
-            $invitation = new ($this->invitationModel())([
-                'workspace_id' => $workspace->getKey(),
-                'email' => $email,
-            ]);
+            ->whereNull('accepted_at')
+            ->exists()) {
+            throw ValidationException::withMessages(['email' => 'An invitation is already pending for this e-mail address.']);
         }
 
-        $invitation->role = $data['role'];
-        $invitation->token = Str::random(64);
-        $invitation->invited_by = $invitedBy?->getAuthIdentifier();
-        $invitation->expires_at = now()->addDays(max(1, (int) config('larasaas.workspaces.invitation_ttl_days', 7)));
-        $invitation->accepted_at = null;
-        $invitation->save();
+        /** @var WorkspaceInvitation $invitation */
+        $invitation = $invitationClass::query()->create([
+            'workspace_id' => $workspace->getKey(),
+            'email' => $email,
+            'role' => $role,
+            'token' => $this->uniqueToken($invitationClass),
+            'invited_by' => $inviter?->getKey(),
+            'expires_at' => now()->addDays((int) config('larasaas.multi_tenant.invitation_expires_days', 7)),
+        ]);
 
-        return $invitation->refresh();
+        return $invitation;
     }
 
-    /** Accept by token for `$user` (e-mail must match when configured). */
-    public function acceptByToken(string $token, Model $user): WorkspaceMember
-    {
-        $invitation = $this->invitationModel()::query()->where('token', $token)->first();
-
-        if (! $invitation) {
-            throw ValidationException::withMessages([
-                'token' => 'This invitation link is invalid.',
-            ]);
-        }
-
-        return $this->accept($invitation, $user);
-    }
-
-    public function accept(WorkspaceInvitation $invitation, Model $user): WorkspaceMember
+    /** Accept a pending invitation: creates the membership with the invited role. */
+    public function acceptInvitation(WorkspaceInvitation $invitation, $user): WorkspaceMember
     {
         if ($invitation->isAccepted()) {
-            throw ValidationException::withMessages([
-                'token' => 'This invitation has already been accepted.',
-            ]);
+            throw ValidationException::withMessages(['invitation' => 'This invitation has already been accepted.']);
         }
 
         if ($invitation->isExpired()) {
-            throw ValidationException::withMessages([
-                'token' => 'This invitation has expired. Ask for a new one.',
-            ]);
+            throw ValidationException::withMessages(['invitation' => 'This invitation has expired.']);
         }
 
-        if (config('larasaas.workspaces.invite_by_email', true)) {
-            $email = (string) ($user->email ?? '');
+        if (config('larasaas.multi_tenant.strict_invitation_email', true)) {
+            $email = strtolower((string) ($user->email ?? ''));
 
-            if ($email === '' || strtolower($email) !== strtolower((string) $invitation->email)) {
-                throw ValidationException::withMessages([
-                    'email' => 'This invitation was sent to a different e-mail address.',
-                ]);
+            if ($email === '' || $email !== strtolower((string) $invitation->email)) {
+                throw new AuthorizationException('This invitation was sent to a different e-mail address.');
             }
+        }
+
+        if ($this->memberFor($invitation->workspace, $user)) {
+            throw ValidationException::withMessages(['invitation' => 'You are already a member of this workspace.']);
         }
 
         return DB::transaction(function () use ($invitation, $user) {
-            $member = $invitation->workspace->members()
-                ->where('user_id', $user->getAuthIdentifier())
-                ->first();
+            /** @var WorkspaceMember $member */
+            $member = $this->membershipClass()::query()->create([
+                'workspace_id' => $invitation->workspace_id,
+                'user_id' => $user->getKey(),
+                'role' => $invitation->role,
+            ]);
 
-            if ($member === null) {
-                $member = $this->membershipModel()::create([
-                    'workspace_id' => $invitation->workspace_id,
-                    'user_id' => $user->getAuthIdentifier(),
-                    'role' => $invitation->roleEnum()->value,
-                ]);
-            }
+            $invitation->forceFill(['accepted_at' => now()])->save();
 
-            $invitation->accepted_at = now();
-            $invitation->save();
-
-            return $member->refresh();
+            return $member;
         });
     }
 
-    /** Revoke a pending invitation. */
-    public function cancelInvitation(WorkspaceInvitation $invitation): void
+    /** Revoke a pending invitation (Owners and Admins). */
+    public function revokeInvitation(Model $workspace, $actor, WorkspaceInvitation $invitation): void
     {
+        if (! $this->hasRole($workspace, $actor, [WorkspaceMember::ROLE_OWNER, WorkspaceMember::ROLE_ADMIN])) {
+            throw new AuthorizationException('Only workspace Owners and Admins can manage invitations.');
+        }
+
+        if ((int) $invitation->workspace_id !== (int) $workspace->getKey()) {
+            throw new AuthorizationException('This invitation belongs to another workspace.');
+        }
+
         $invitation->delete();
     }
 
-    /** Regenerate the token + expiry of a pending invitation (resend). */
-    public function resendInvitation(WorkspaceInvitation $invitation): WorkspaceInvitation
+    /** Only Owners change member roles. The last Owner can never be demoted. */
+    public function changeRole(Model $workspace, $actor, $user, string $role): WorkspaceMember
     {
-        if ($invitation->isAccepted()) {
-            throw ValidationException::withMessages([
-                'token' => 'This invitation has already been accepted.',
-            ]);
+        if (! $this->hasRole($workspace, $actor, WorkspaceMember::ROLE_OWNER)) {
+            throw new AuthorizationException('Only the workspace Owner can change roles.');
         }
 
-        $invitation->token = Str::random(64);
-        $invitation->expires_at = now()->addDays(max(1, (int) config('larasaas.workspaces.invitation_ttl_days', 7)));
-        $invitation->save();
-
-        return $invitation->refresh();
-    }
-
-    /*
-    |------------------------------------------------------------------
-    | Helpers
-    |------------------------------------------------------------------
-    */
-
-    /** @return class-string<Workspace> */
-    public function workspaceModel(): string
-    {
-        return config('larasaas.workspaces.model', Workspace::class);
-    }
-
-    public function workspaceTable(): string
-    {
-        return (new ($this->workspaceModel()))->getTable();
-    }
-
-    /** @return class-string<WorkspaceMember> */
-    public function membershipModel(): string
-    {
-        return config('larasaas.workspaces.member_model', WorkspaceMember::class);
-    }
-
-    /** @return class-string<WorkspaceInvitation> */
-    public function invitationModel(): string
-    {
-        return config('larasaas.workspaces.invitation_model', WorkspaceInvitation::class);
-    }
-
-    protected function requireMember(Workspace $workspace, Model $user): WorkspaceMember
-    {
-        return $workspace->members()->where('user_id', $user->getAuthIdentifier())->first()
-            ?? throw ValidationException::withMessages([
-                'user' => 'This user is not a member of the workspace.',
-            ]);
-    }
-
-    protected function uniqueSlug(string $name): string
-    {
-        $base = Str::slug($name) ?: 'workspace';
-        $slug = $base;
-
-        for ($i = 2; $this->slugExists($slug); $i++) {
-            $slug = $base . '-' . $i;
+        if (! in_array($role, $this->roles(), true)) {
+            throw ValidationException::withMessages(['role' => "Unknown workspace role [{$role}]."]);
         }
 
-        return $slug;
-    }
+        $member = $this->memberFor($workspace, $user)
+            ?? throw ValidationException::withMessages(['user' => 'This user is not a member of the workspace.']);
 
-    protected function slugExists(string $slug): bool
-    {
-        return $this->workspaceModel()::query()->where('slug', $slug)->exists();
+        if ($member->role === WorkspaceMember::ROLE_OWNER && $role !== WorkspaceMember::ROLE_OWNER) {
+            $this->guardNotLastOwner($workspace, $member);
+        }
+
+        $member->forceFill(['role' => $role])->save();
+
+        return $member->fresh();
     }
 
     /**
-     * @param  array<string, mixed>  $attributes
-     * @param  array<string, array<int, mixed>>  $rules
-     * @return array<string, mixed>
+     * Remove a member: Owners may remove anyone (except the last Owner),
+     * Admins may remove plain Members.
      */
-    protected function validated(array $attributes, array $rules): array
+    public function removeMember(Model $workspace, $actor, $user): void
     {
-        return Validator::make($attributes, $rules)->validate();
+        $member = $this->memberFor($workspace, $user)
+            ?? throw ValidationException::withMessages(['user' => 'This user is not a member of the workspace.']);
+
+        $actorMember = $this->memberFor($workspace, $actor);
+
+        if ($actorMember?->isOwner()) {
+            if ($member->isOwner()) {
+                $this->guardNotLastOwner($workspace, $member);
+            }
+        } elseif ($actorMember?->hasRole(WorkspaceMember::ROLE_ADMIN)) {
+            if ($member->role !== WorkspaceMember::ROLE_MEMBER) {
+                throw new AuthorizationException('Admins can only remove Members.');
+            }
+        } else {
+            throw new AuthorizationException('Only workspace Owners and Admins can remove members.');
+        }
+
+        DB::transaction(function () use ($workspace, $member) {
+            $member->delete();
+
+            // Keep the primary owner pointer valid when its user leaves.
+            if ((int) $workspace->owner_id === (int) $member->user_id) {
+                $successor = $workspace->members()->where('role', WorkspaceMember::ROLE_OWNER)->orderBy('id')->first();
+
+                if ($successor) {
+                    $workspace->forceFill(['owner_id' => $successor->user_id])->save();
+                }
+            }
+        });
+    }
+
+    /* Role-rule helpers */
+
+    /** Who may assign which roles when inviting. */
+    protected function guardCanAssign(Model $workspace, $actor, string $role): void
+    {
+        $member = $this->memberFor($workspace, $actor);
+
+        if (! $member) {
+            throw new AuthorizationException('You are not a member of this workspace.');
+        }
+
+        $allowed = match (true) {
+            $member->isOwner() => $this->roles(),
+            $member->hasRole(WorkspaceMember::ROLE_ADMIN) => array_values(array_diff($this->roles(), [WorkspaceMember::ROLE_OWNER])),
+            default => [],
+        };
+
+        if (! in_array($role, $allowed, true)) {
+            throw new AuthorizationException('You are not allowed to assign this workspace role.');
+        }
+    }
+
+    protected function guardNotLastOwner(Model $workspace, WorkspaceMember $member): void
+    {
+        $owners = $workspace->members()->where('role', WorkspaceMember::ROLE_OWNER)->count();
+
+        if ($owners <= 1) {
+            throw ValidationException::withMessages([
+                'role' => 'A workspace must keep at least one Owner. Promote another member first.',
+            ]);
+        }
+    }
+
+    protected function uniqueSlug(string $workspaceClass, string $slug): string
+    {
+        $base = $slug !== '' ? $slug : 'workspace';
+        $candidate = $base;
+        $suffix = 2;
+
+        while ($workspaceClass::query()->where('slug', $candidate)->exists()) {
+            $candidate = $base . '-' . $suffix++;
+        }
+
+        return $candidate;
+    }
+
+    protected function uniqueToken(string $invitationClass): string
+    {
+        do {
+            $token = Str::random(64);
+        } while ($invitationClass::query()->where('token', $token)->exists());
+
+        return $token;
+    }
+
+    protected function findUserByEmail(string $email): ?Model
+    {
+        $class = config('larasaas.user_model', 'App\\Models\\User');
+
+        if (! class_exists($class)) {
+            return null;
+        }
+
+        /** @var Model|null $user */
+        $user = $class::query()->whereRaw('lower(email) = ?', [$email])->first();
+
+        return $user;
     }
 }

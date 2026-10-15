@@ -85,4 +85,39 @@ return [
         'not_authenticated' => 'This embed link is missing or expired. Ask the host application to generate a fresh one with LaraSaaS::embedUrl().',
         'powered_by'        => 'Secured by :app',
     ],
+
+    'workspaces' => [
+        'title'        => 'Workspaces',
+        'subtitle'     => 'Operate within parallel organizational structures — each workspace has its own team, roles and billing.',
+        'create'       => 'Create a workspace',
+        'name'         => 'Name',
+        'slug'         => 'URL slug (optional)',
+        'empty'        => 'No workspaces yet — create your first one above.',
+        'manage_team'  => 'Manage team',
+        'roles' => [
+            'owner'  => 'Owner',
+            'admin'  => 'Admin',
+            'member' => 'Member',
+        ],
+    ],
+
+    'teams' => [
+        'title'          => 'Team',
+        'subtitle'       => 'Granular workspace-level roles — Owner, Admin, Member — and invitations.',
+        'back'           => 'All workspaces',
+        'members'        => 'Members',
+        'remove'         => 'Remove',
+        'remove_confirm' => 'Remove this member from the workspace?',
+        'invitations'    => 'Invitations',
+        'invite_email'   => 'E-mail address',
+        'role'           => 'Role',
+        'send_invite'    => 'Send invitation',
+        'no_invitations' => 'No invitations yet.',
+        'accepted'       => 'Accepted',
+        'pending'        => 'Pending',
+        'expired'        => 'Expired',
+        'revoke'         => 'Revoke',
+        'revoke_confirm' => 'Revoke this invitation?',
+    ],
+
 ];

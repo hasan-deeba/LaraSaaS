@@ -14,10 +14,16 @@ class PlanManagementTest extends TestCase
         parent::defineEnvironment($app); // custom mode: no package admin or embed routes
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+        // The schema migration resolves the billable table from config; this
+        // test exercises plan management without any real users.
+        $app['config']->set('larasaas.user_model', ManagementUser::class);
     }
 
     protected function defineDatabaseMigrations(): void
     {
+        \Illuminate\Support\Facades\Schema::create('users', function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->id();
+        });
         (require __DIR__ . '/../database/migrations/2026_10_14_000000_create_larasaas_schema.php')->up();
     }
 
@@ -133,4 +139,10 @@ class PlanManagementTest extends TestCase
             }
         }
     }
+}
+
+class ManagementUser extends \Illuminate\Foundation\Auth\User
+{
+    protected $table = 'users';
+    protected $guarded = [];
 }

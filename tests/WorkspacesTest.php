@@ -3,352 +3,325 @@
 namespace LaraSaaS\Tests;
 
 use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Foundation\Auth\User;
+use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
-use Illuminate\Validation\ValidationException;
-use LaraSaaS\Models\Workspace;
-use LaraSaaS\Models\WorkspaceInvitation;
-use LaraSaaS\Models\WorkspaceMember;
-use LaraSaaS\Support\WorkspaceManager;
-use LaraSaaS\Support\WorkspaceRole;
+use LaraSaaS\LaraSaaS;
+use Laravel\Cashier\Billable;
 
-/**
- * Multi-tenant workspaces & team management: creation, granular roles
- * (Owner, Admin, Member), the invitation lifecycle and ownership rules.
- */
 class WorkspacesTest extends TestCase
 {
     protected function defineEnvironment($app): void
     {
         parent::defineEnvironment($app);
-        $app['config']->set('app.key', 'base64:' . base64_encode(str_repeat('a', 32)));
         $app['config']->set('database.default', 'testing');
         $app['config']->set('database.connections.testing', ['driver' => 'sqlite', 'database' => ':memory:', 'prefix' => '']);
+        $app['config']->set('app.key', 'base64:' . base64_encode(str_repeat('a', 32)));
+        $app['config']->set('larasaas.integration.mode', 'all');
+        $app['config']->set('larasaas.user_model', TeamUser::class);
+        $app['config']->set('auth.providers.users.model', TeamUser::class);
+        $app['config']->set('larasaas.multi_tenant.enabled', true);
     }
 
     protected function defineDatabaseMigrations(): void
     {
-        (require __DIR__ . '/../database/migrations/2026_10_14_000000_create_larasaas_schema.php')->up();
         Schema::create('users', function (Blueprint $table) {
             $table->id();
-            $table->string('email')->nullable();
+            $table->string('name')->nullable();
+            $table->string('email');
             $table->timestamps();
         });
+
+        (require __DIR__ . '/../database/migrations/2026_10_14_000000_create_larasaas_schema.php')->up();
+        (require __DIR__ . '/../database/migrations/2026_10_14_000001_create_larasaas_workspaces_schema.php')->up();
     }
 
-    private function user(string $email = 'owner@example.com'): \App\Models\User
+    private function user(string $email = 'owner@example.com'): TeamUser
     {
-        return \App\Models\User::create(['email' => $email]);
+        return TeamUser::create(['email' => $email, 'name' => ucfirst(strtok($email, '@'))]);
     }
 
-    private function manager(): WorkspaceManager
+    private function workspaceFor(TeamUser $owner, string $name = 'Acme'): \LaraSaaS\Models\Workspace
     {
-        return app(WorkspaceManager::class);
+        return app(LaraSaaS::class)->createWorkspace($owner, ['name' => $name]);
     }
 
-    /*
-    |----------------------------------------------------------------------
-    | Workspaces
-    |----------------------------------------------------------------------
-    */
+    /* Workspaces */
 
-    public function test_creating_a_workspace_enrolls_the_owner(): void
-    {
-        $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme Inc'], $owner);
-
-        $this->assertSame('acme-inc', $workspace->slug);
-        $this->assertSame($owner->id, $workspace->owner_id);
-        $this->assertTrue($workspace->isOwnedBy($owner));
-        $this->assertSame(WorkspaceRole::Owner, $workspace->roleFor($owner));
-
-        $membership = $workspace->membershipFor($owner);
-        $this->assertTrue($membership->isOwner());
-    }
-
-    public function test_slugs_are_unique_and_follow_the_name(): void
+    public function test_creating_a_workspace_makes_the_creator_its_owner(): void
     {
         $owner = $this->user();
-        $first = $this->manager()->create(['name' => 'Acme Inc'], $owner);
-        $second = $this->manager()->create(['name' => 'Acme Inc'], $owner);
+        $this->actingAs($owner);
 
-        $this->assertSame('acme-inc', $first->slug);
-        $this->assertSame('acme-inc-2', $second->slug);
+        $this->postJson('/api/larasaas/workspaces', ['name' => 'Acme Inc'])
+            ->assertCreated()
+            ->assertJsonPath('data.name', 'Acme Inc')
+            ->assertJsonPath('data.slug', 'acme-inc')
+            ->assertJsonPath('data.role', 'owner');
 
-        $custom = $this->manager()->create(['name' => 'Custom', 'slug' => 'my-team'], $owner);
-        $this->assertSame('my-team', $custom->slug);
+        $workspace = \LaraSaaS\Models\Workspace::firstOrFail();
+        $this->assertSame($owner->id, (int) $workspace->owner_id);
+        $member = \LaraSaaS\Models\WorkspaceMember::firstOrFail();
+        $this->assertSame('owner', $member->role);
+        $this->assertSame($owner->id, (int) $member->user_id);
     }
 
-    public function test_workspace_names_and_slugs_are_validated(): void
+    public function test_users_only_see_their_own_workspaces(): void
     {
         $owner = $this->user();
+        $this->workspaceFor($owner, 'Mine');
+        $other = $this->user('other@example.com');
+        $this->workspaceFor($other, 'Theirs');
 
-        foreach ([[], ['name' => str_repeat('x', 200)], ['name' => 'ok', 'slug' => 'Bad Slug!']] as $invalid) {
-            try {
-                $this->manager()->create($invalid, $owner);
-                $this->fail('Expected validation to fail for ' . json_encode($invalid));
-            } catch (ValidationException) {
-                $this->assertTrue(true);
-            }
-        }
+        $this->actingAs($owner)->getJson('/api/larasaas/workspaces')
+            ->assertOk()
+            ->assertJsonCount(1, 'data')
+            ->assertJsonPath('data.0.name', 'Mine');
+
+        $this->actingAs($other)->getJson('/api/larasaas/workspaces/' . \LaraSaaS\Models\Workspace::where('name', 'Mine')->first()->id)
+            ->assertForbidden();
     }
 
-    /*
-    |----------------------------------------------------------------------
-    | Granular roles
-    |----------------------------------------------------------------------
-    */
+    /* Invitations */
 
-    public function test_roles_have_granular_permissions(): void
+    public function test_invitation_flow_creates_members_with_the_invited_role(): void
     {
-        $owner = WorkspaceRole::Owner;
-        $admin = WorkspaceRole::Admin;
-        $member = WorkspaceRole::Member;
+        $owner = $this->user();
+        $workspace = $this->workspaceFor($owner);
 
-        $this->assertTrue($owner->allows('workspace.delete'));
-        $this->assertTrue($owner->allows('ownership.transfer'));
-        $this->assertFalse($admin->allows('workspace.delete'));
-        $this->assertFalse($admin->allows('ownership.transfer'));
-        $this->assertTrue($admin->allows('members.invite'));
-        $this->assertTrue($admin->allows('invitations.manage'));
-        $this->assertFalse($member->allows('members.invite'));
-        $this->assertTrue($member->allows('members.view'));
+        $this->actingAs($owner)
+            ->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'joiner@example.com', 'role' => 'admin'])
+            ->assertCreated()
+            ->assertJsonPath('data.email', 'joiner@example.com')
+            ->assertJsonPath('data.role', 'admin')
+            ->assertJsonPath('data.pending', true);
 
-        $this->assertTrue($owner->isAtLeast($admin));
-        $this->assertFalse($admin->isAtLeast($owner));
+        $token = \LaraSaaS\Models\WorkspaceInvitation::firstOrFail()->token;
 
-        config(['larasaas.workspaces.role_permissions' => ['member' => ['members.invite']]]);
-        $this->assertTrue(WorkspaceRole::Member->allows('members.invite'));
-        $this->assertFalse(WorkspaceRole::Member->allows('members.view'));
+        // Anyone can preview the invitation before accepting.
+        $this->actingAs($this->user('joiner@example.com'))
+            ->getJson("/api/larasaas/invitations/{$token}")
+            ->assertOk()
+            ->assertJsonPath('data.workspace.name', 'Acme');
+
+        $this->actingAs($this->user('joiner@example.com'))
+            ->postJson("/api/larasaas/invitations/{$token}/accept")
+            ->assertCreated()
+            ->assertJsonPath('data.role', 'admin');
+
+        $this->assertDatabaseHas('larasaas_workspace_members', [
+            'workspace_id' => $workspace->id,
+            'user_id' => \LaraSaaS\Models\WorkspaceMember::where('role', 'admin')->first()->user_id,
+            'role' => 'admin',
+        ]);
+        $this->assertTrue((bool) \LaraSaaS\Models\WorkspaceInvitation::first()->accepted_at);
     }
 
-    public function test_only_admin_and_member_roles_are_assignable(): void
+    public function test_invitations_are_email_strict_expire_and_reject_duplicates(): void
     {
-        $this->assertSame(['admin', 'member'], array_map(fn ($r) => $r->value, WorkspaceRole::assignable()));
+        $owner = $this->user();
+        $workspace = $this->workspaceFor($owner);
 
-        $workspace = $this->manager()->create(['name' => 'Acme'], $this->user());
+        // Duplicate pending invitations are rejected.
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'dup@example.com'])->assertCreated();
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'dup@example.com'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email');
+
+        // Inviting an existing member is rejected.
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'owner@example.com'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('email');
+
+        // Strict e-mail matching: only the invited address can accept.
+        $token = \LaraSaaS\Models\WorkspaceInvitation::where('email', 'dup@example.com')->first()->token;
+        $this->actingAs($this->user('intruder@example.com'))->postJson("/api/larasaas/invitations/{$token}/accept")->assertForbidden();
+
+        // Expired invitations cannot be accepted.
+        $this->travel(8)->days();
+        $this->actingAs($this->user('dup@example.com'))->postJson("/api/larasaas/invitations/{$token}/accept")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('invitation');
+    }
+
+    public function test_revoking_an_invitation_blocks_acceptance(): void
+    {
+        $owner = $this->user();
+        $workspace = $this->workspaceFor($owner);
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'gone@example.com'])->assertCreated();
+        $invitation = \LaraSaaS\Models\WorkspaceInvitation::firstOrFail();
+
+        $this->actingAs($owner)->deleteJson("/api/larasaas/workspaces/{$workspace->id}/invitations/{$invitation->id}")->assertOk();
+        $this->assertDatabaseMissing('larasaas_workspace_invitations', ['id' => $invitation->id]);
+
+        $this->actingAs($this->user('gone@example.com'))->postJson("/api/larasaas/invitations/{$invitation->token}/accept")
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('invitation');
+    }
+
+    /* Granular roles */
+
+    public function test_role_rules_are_granular_across_owner_admin_and_member(): void
+    {
+        $owner = $this->user();
+        $workspace = $this->workspaceFor($owner);
+
+        $admin = $this->user('admin@example.com');
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'admin@example.com', 'role' => 'admin'])->assertCreated();
+        $this->actingAs($admin)->postJson('/api/larasaas/invitations/' . \LaraSaaS\Models\WorkspaceInvitation::first()->token . '/accept')->assertCreated();
+
         $member = $this->user('member@example.com');
-        $this->manager()->invite($workspace, 'member@example.com', 'admin');
-        $this->manager()->acceptByToken($workspace->invitations()->first()->token, $member);
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'member@example.com', 'role' => 'member'])->assertCreated();
+        $this->actingAs($member)->postJson('/api/larasaas/invitations/' . \LaraSaaS\Models\WorkspaceInvitation::where('email', 'member@example.com')->first()->token . '/accept')->assertCreated();
 
-        foreach (['owner', 'superuser', ''] as $role) {
-            try {
-                $this->manager()->updateMemberRole($workspace, $member, $role);
-                $this->fail("Role [{$role}] must not be assignable");
-            } catch (ValidationException) {
-                $this->assertTrue(true);
-            }
-        }
+        // Members cannot invite at all.
+        $this->actingAs($member)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'x@example.com'])->assertForbidden();
 
-        $this->manager()->updateMemberRole($workspace, $member, 'member');
-        $this->assertSame(WorkspaceRole::Member, $workspace->roleFor($member));
+        // Admins can invite Admins and Members, but never Owners.
+        $this->actingAs($admin)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'admin2@example.com', 'role' => 'admin'])->assertCreated();
+        $this->actingAs($admin)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'o@example.com', 'role' => 'owner'])->assertForbidden();
+
+        // Members cannot see the invitation list; Admins can.
+        $this->actingAs($member)->getJson("/api/larasaas/workspaces/{$workspace->id}/invitations")->assertForbidden();
+        $this->actingAs($admin)->getJson("/api/larasaas/workspaces/{$workspace->id}/invitations")->assertOk()->assertJsonCount(3, 'data');
     }
 
-    /*
-    |----------------------------------------------------------------------
-    | Invitations
-    |----------------------------------------------------------------------
-    */
-
-    public function test_invitations_carry_role_token_and_expiry(): void
+    public function test_only_owners_change_roles_and_the_last_owner_is_protected(): void
     {
         $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
-
-        $invitation = $this->manager()->invite($workspace, 'Teammate@Example.com', 'admin', $owner);
-
-        $this->assertSame('teammate@example.com', $invitation->email);
-        $this->assertSame(WorkspaceRole::Admin, $invitation->roleEnum());
-        $this->assertSame(64, strlen($invitation->token));
-        $this->assertTrue($invitation->isPending());
-        $this->assertFalse($invitation->isExpired());
-        $this->assertNotNull($invitation->expires_at);
-        $this->assertStringContainsString($invitation->token, $invitation->acceptUrl());
-    }
-
-    public function test_re_inviting_a_pending_email_resends_with_a_fresh_token(): void
-    {
-        $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
-
-        $first = $this->manager()->invite($workspace, 'teammate@example.com');
-        $second = $this->manager()->invite($workspace, 'teammate@example.com', 'admin');
-
-        $this->assertSame($first->id, $second->id);
-        $this->assertNotSame($first->token, $second->token);
-        $this->assertSame(WorkspaceRole::Admin, $second->roleEnum());
-        $this->assertSame(1, $workspace->invitations()->count());
-    }
-
-    public function test_accepting_an_invitation_creates_the_membership(): void
-    {
-        $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
-        $invitation = $this->manager()->invite($workspace, 'teammate@example.com', 'admin');
-        $teammate = $this->user('teammate@example.com');
-
-        $membership = $this->manager()->acceptByToken($invitation->token, $teammate);
-
-        $this->assertSame(WorkspaceRole::Admin, $workspace->roleFor($teammate));
-        $this->assertTrue($invitation->fresh()->isAccepted());
-        $this->assertSame(WorkspaceRole::Admin, $membership->roleEnum());
-
-        try {
-            $this->manager()->acceptByToken($invitation->token, $teammate);
-            $this->fail('A second accept must fail');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('already been accepted', $e->getMessage());
-        }
-    }
-
-    public function test_invitations_must_match_the_invited_email_and_not_be_expired(): void
-    {
-        $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
-        $invitation = $this->manager()->invite($workspace, 'teammate@example.com');
-
-        try {
-            $this->manager()->acceptByToken($invitation->token, $this->user('intruder@example.com'));
-            $this->fail('A different e-mail must not be able to accept');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('different e-mail', $e->getMessage());
-        }
-
-        $invitation->expires_at = now()->subDay();
-        $invitation->save();
-
-        try {
-            $this->manager()->acceptByToken($invitation->token, $this->user('teammate@example.com'));
-            $this->fail('An expired invitation must not be acceptable');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('expired', $e->getMessage());
-        }
-
-        try {
-            $this->manager()->acceptByToken('nope', $this->user('teammate@example.com'));
-            $this->fail('An unknown token must fail');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('invalid', $e->getMessage());
-        }
-    }
-
-    public function test_cancelling_and_resending_invitations(): void
-    {
-        $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
-        $invitation = $this->manager()->invite($workspace, 'teammate@example.com');
-        $previousToken = $invitation->token;
-
-        $resent = $this->manager()->resendInvitation($invitation);
-        $this->assertNotSame($previousToken, $resent->token);
-        $this->assertTrue($resent->isPending());
-
-        $this->manager()->cancelInvitation($resent);
-        $this->assertSame(0, WorkspaceInvitation::query()->count());
-    }
-
-    public function test_already_members_cannot_be_invited(): void
-    {
-        $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
-
-        try {
-            $this->manager()->invite($workspace, 'owner@example.com');
-            $this->fail('Owners are already members');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('already a member', $e->getMessage());
-        }
-    }
-
-    /*
-    |----------------------------------------------------------------------
-    | Membership rules
-    |----------------------------------------------------------------------
-    */
-
-    public function test_the_owner_can_never_be_demoted_or_removed(): void
-    {
-        $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
-
-        try {
-            $this->manager()->updateMemberRole($workspace, $owner, 'admin');
-            $this->fail('The owner must not be demotable');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('Transfer ownership', $e->getMessage());
-        }
-
-        try {
-            $this->manager()->removeMember($workspace, $owner);
-            $this->fail('The owner must not be removable');
-        } catch (ValidationException $e) {
-            $this->assertStringContainsString('Transfer ownership', $e->getMessage());
-        }
-    }
-
-    public function test_removing_members_and_the_non_member_guard(): void
-    {
-        $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
-        $teammate = $this->user('teammate@example.com');
-        $this->manager()->invite($workspace, 'teammate@example.com');
-        $this->manager()->acceptByToken($workspace->invitations()->first()->token, $teammate);
-
-        $outsider = $this->user('outsider@example.com');
-        try {
-            $this->manager()->removeMember($workspace, $outsider);
-            $this->fail('Non-members cannot be removed');
-        } catch (ValidationException) {
-            $this->assertTrue(true);
-        }
-
-        $this->manager()->removeMember($workspace, $teammate);
-        $this->assertFalse($workspace->hasMember($teammate));
-    }
-
-    public function test_transferring_ownership_keeps_the_roles_consistent(): void
-    {
-        $owner = $this->user();
-        $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
-        $successor = $this->user('successor@example.com');
-        $this->manager()->invite($workspace, 'successor@example.com');
-        $this->manager()->acceptByToken($workspace->invitations()->first()->token, $successor);
-
-        $this->manager()->transferOwnership($workspace, $successor);
-
-        $this->assertSame($successor->id, $workspace->fresh()->owner_id);
-        $this->assertSame(WorkspaceRole::Owner, $workspace->roleFor($successor));
-        $this->assertSame(WorkspaceRole::Admin, $workspace->roleFor($owner));
-    }
-
-    /*
-    |----------------------------------------------------------------------
-    | HasWorkspaces trait (host user model)
-    |----------------------------------------------------------------------
-    */
-
-    public function test_host_user_model_helpers(): void
-    {
-        $owner = $this->user();
+        $workspace = $this->workspaceFor($owner);
         $member = $this->user('member@example.com');
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'member@example.com'])->assertCreated();
+        $this->actingAs($member)->postJson('/api/larasaas/invitations/' . \LaraSaaS\Models\WorkspaceInvitation::first()->token . '/accept')->assertCreated();
 
-        $one = $this->manager()->create(['name' => 'One'], $owner);
-        $two = $this->manager()->create(['name' => 'Two'], $owner);
-        $this->manager()->invite($two, 'member@example.com');
-        $this->manager()->acceptByToken($two->invitations()->first()->token, $member);
+        // Admins (and members) cannot change roles — only Owners.
+        $admin = $this->user('admin@example.com');
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'admin@example.com', 'role' => 'admin'])->assertCreated();
+        $this->actingAs($admin)->postJson('/api/larasaas/invitations/' . \LaraSaaS\Models\WorkspaceInvitation::where('email', 'admin@example.com')->first()->token . '/accept')->assertCreated();
+        $this->actingAs($admin)->putJson("/api/larasaas/workspaces/{$workspace->id}/members/{$member->id}/role", ['role' => 'admin'])->assertForbidden();
 
-        // The fixture user model opts into the shipped trait.
-        $this->assertTrue(method_exists($owner, 'workspaces'));
-        $this->assertCount(2, $owner->ownedWorkspaces()->get());
-        $this->assertSame($one->id, $owner->currentWorkspace()?->id); // fallback = first membership
-        $this->assertSame($two->id, $owner->switchWorkspace($two)?->id);
-        $this->assertSame($two->id, $owner->fresh()->currentWorkspace()?->id);
+        // The last Owner can never be demoted…
+        $this->actingAs($owner)->putJson("/api/larasaas/workspaces/{$workspace->id}/members/{$owner->id}/role", ['role' => 'member'])
+            ->assertUnprocessable()
+            ->assertJsonValidationErrors('role');
 
-        $this->assertTrue($member->isMemberOf($two));
-        $this->assertFalse($member->isMemberOf($one));
-        $this->assertSame(WorkspaceRole::Member, $member->roleIn($two));
-        $this->assertTrue($member->canInWorkspace($two, 'members.view'));
-        $this->assertFalse($member->canInWorkspace($two, 'members.invite'));
-
-        $this->assertCount(1, $this->manager()->workspaceModel()::query()->visibleTo($member)->get());
+        // …until a second Owner exists.
+        $this->actingAs($owner)->putJson("/api/larasaas/workspaces/{$workspace->id}/members/{$member->id}/role", ['role' => 'owner'])->assertOk()
+            ->assertJsonPath('data.role', 'owner');
+        $this->actingAs($owner)->putJson("/api/larasaas/workspaces/{$workspace->id}/members/{$owner->id}/role", ['role' => 'member'])->assertOk();
+        $this->assertSame('member', app(LaraSaaS::class)->workspaceMembers($workspace)->firstWhere('user_id', $owner->id)->role);
     }
+
+    public function test_member_removal_rules_and_owner_pointer_reassignment(): void
+    {
+        $owner = $this->user();
+        $workspace = $this->workspaceFor($owner);
+        $member = $this->user('member@example.com');
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'member@example.com'])->assertCreated();
+        $this->actingAs($member)->postJson('/api/larasaas/invitations/' . \LaraSaaS\Models\WorkspaceInvitation::first()->token . '/accept')->assertCreated();
+        $admin = $this->user('admin@example.com');
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'admin@example.com', 'role' => 'admin'])->assertCreated();
+        $this->actingAs($admin)->postJson('/api/larasaas/invitations/' . \LaraSaaS\Models\WorkspaceInvitation::where('email', 'admin@example.com')->first()->token . '/accept')->assertCreated();
+
+        // Admins can remove Members but neither Owners nor other Admins.
+        $this->actingAs($admin)->deleteJson("/api/larasaas/workspaces/{$workspace->id}/members/{$owner->id}")->assertForbidden();
+        $this->actingAs($admin)->deleteJson("/api/larasaas/workspaces/{$workspace->id}/members/{$admin->id}")->assertForbidden();
+        $this->actingAs($admin)->deleteJson("/api/larasaas/workspaces/{$workspace->id}/members/{$member->id}")->assertOk();
+        $this->assertDatabaseMissing('larasaas_workspace_members', ['workspace_id' => $workspace->id, 'user_id' => $member->id]);
+
+        // The last Owner cannot leave the workspace ownerless.
+        $this->actingAs($owner)->deleteJson("/api/larasaas/workspaces/{$workspace->id}/members/{$owner->id}")
+            ->assertUnprocessable();
+
+        // With a co-owner, the primary owner pointer follows the successor.
+        $co = $this->user('co@example.com');
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'co@example.com', 'role' => 'owner'])->assertCreated();
+        $this->actingAs($co)->postJson('/api/larasaas/invitations/' . \LaraSaaS\Models\WorkspaceInvitation::where('email', 'co@example.com')->first()->token . '/accept')->assertCreated();
+        $this->actingAs($owner)->deleteJson("/api/larasaas/workspaces/{$workspace->id}/members/{$owner->id}")->assertOk();
+        $this->assertSame($co->id, (int) $workspace->fresh()->owner_id);
+    }
+
+    /* Role model */
+
+    public function test_roles_imply_their_lower_roles(): void
+    {
+        $owner = $this->user();
+        $workspace = $this->workspaceFor($owner);
+        $member = app(LaraSaaS::class)->workspaceMembers($workspace)->first();
+
+        $this->assertTrue($member->hasRole('owner'));
+        $this->assertTrue($member->hasRole('admin'));
+        $this->assertTrue($member->hasRole('member'));
+        $this->assertTrue($member->hasRole(['admin', 'member']));
+        $this->assertFalse($member->hasRole('guest'));
+    }
+
+    /* Billing integration */
+
+    public function test_multi_tenant_workspace_billing_resolves_the_users_current_workspace(): void
+    {
+        config([
+            'larasaas.multi_tenant.workspace_model' => BillableTeamWorkspace::class,
+            'larasaas.billing.billable' => 'workspace',
+        ]);
+
+        $owner = $this->user();
+        /** @var BillableTeamWorkspace $first */
+        $first = app(LaraSaaS::class)->createWorkspace($owner, ['name' => 'First']);
+        /** @var BillableTeamWorkspace $second */
+        $second = app(LaraSaaS::class)->createWorkspace($owner, ['name' => 'Second']);
+
+        $request = Request::create('/');
+        $request->setUserResolver(fn () => $owner);
+
+        // No custom resolver and no currentWorkspace() method: the multi-tenant
+        // tables drive the default — most recently joined workspace.
+        $this->assertSame($second->getKey(), app(LaraSaaS::class)->billable($request)->getKey());
+
+        // Membership order decides; joining the first workspace again is not
+        // possible, so removing the second makes the first current again.
+        $second->members()->where('user_id', $owner->id)->delete();
+        $this->assertSame($first->getKey(), app(LaraSaaS::class)->billable($request)->getKey());
+    }
+
+    /* Inertia surface */
+
+    public function test_workspace_and_team_pages_render_with_roles(): void
+    {
+        $owner = $this->user();
+        $workspace = $this->workspaceFor($owner);
+        $this->actingAs($owner);
+
+        $this->get('/app/workspaces', ['X-Inertia' => 'true'])
+            ->assertOk()
+            ->assertJsonPath('component', 'LaraSaaS/Workspaces')
+            ->assertJsonPath('props.workspaces.0.name', 'Acme');
+
+        $this->get("/app/workspaces/{$workspace->id}", ['X-Inertia' => 'true'])
+            ->assertOk()
+            ->assertJsonPath('component', 'LaraSaaS/Team')
+            ->assertJsonPath('props.workspace.role', 'owner')
+            ->assertJsonPath('props.is_owner', true)
+            ->assertJsonPath('props.members.0.role', 'owner');
+
+        // A member without management rights never receives the invite URLs data.
+        $member = $this->user('member@example.com');
+        $this->actingAs($owner)->postJson("/api/larasaas/workspaces/{$workspace->id}/invitations", ['email' => 'member@example.com'])->assertCreated();
+        $this->actingAs($member)->postJson('/api/larasaas/invitations/' . \LaraSaaS\Models\WorkspaceInvitation::first()->token . '/accept')->assertCreated();
+        $this->actingAs($member)->get("/app/workspaces/{$workspace->id}", ['X-Inertia' => 'true'])
+            ->assertOk()
+            ->assertJsonPath('props.can_manage', false)
+            ->assertJsonPath('props.invitations', []);
+    }
+}
+
+class TeamUser extends User
+{
+    protected $table = 'users';
+    protected $guarded = [];
+}
+
+class BillableTeamWorkspace extends \LaraSaaS\Models\Workspace
+{
+    use Billable;
 }

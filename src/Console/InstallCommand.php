@@ -8,6 +8,8 @@ class InstallCommand extends Command
 {
     protected $signature = 'larasaas:install
         {--mode= : Integration mode: inertia, api, embed, all or custom}
+        {--multi-tenant : Enable multi-tenant workspaces & team management}
+        {--no-multi-tenant : Keep the project single-tenant}
         {--migrate : Run the package + cashier migrations right away}
         {--force  : Overwrite previously published files}';
 
@@ -47,6 +49,12 @@ class InstallCommand extends Command
         $this->newLine();
         $this->components->twoColumnDetail('Integration mode', "<fg=cyan>{$mode}</>");
 
+        $multiTenant = $this->resolveMultiTenant();
+        $this->components->twoColumnDetail(
+            'Multi-tenant workspaces',
+            $multiTenant ? '<fg=cyan>enabled (workspaces + teams)</>' : '<fg=cyan>disabled (single-tenant)</>',
+        );
+
         $force = $this->option('force') ? ['--force' => true] : [];
 
         $tags = ['larasaas-config', 'larasaas-lang'];
@@ -61,22 +69,26 @@ class InstallCommand extends Command
             $this->components->twoColumnDetail("Published [{$tag}]", '<fg=green>DONE</>');
         }
 
-        $this->publishMigrations();
+        $this->publishMigrations($multiTenant);
 
-        // Cashier needs its migrations in the host app. The stock customer-columns
-        // migration hardcodes `users`; we replace it with a config-aware version
-        // that targets the configured user/workspace model's table.
-        $this->publishCashierMigrations();
+        // Cashier needs its migrations in the host app.
+        if (class_exists(\Laravel\Cashier\Cashier::class)) {
+            $this->callSilently('vendor:publish', ['--tag' => 'cashier-migrations']);
+            $this->components->twoColumnDetail('Published [cashier-migrations]', '<fg=green>DONE</>');
+        }
 
-        $this->writeEnvMode($mode);
+        $this->guardCashierCustomerColumns();
+
+        $this->writeEnv('LARASAAS_INTEGRATION_MODE', $mode);
+        $this->writeEnv('LARASAAS_MULTI_TENANT', $multiTenant ? 'true' : 'false');
 
         if ($this->option('migrate') || $this->components->confirm('Run the migrations now?', true)) {
             if ($this->call('migrate') !== self::SUCCESS) {
                 return self::FAILURE;
             }
-
-            $this->warnAboutBillingSchema();
         }
+
+        $this->reportSetupAlerts();
 
         $this->newLine();
         $this->components->info('LaraSaaS is ready. Next steps:');
@@ -85,115 +97,156 @@ class InstallCommand extends Command
         $this->line('  3. Point Stripe webhooks at <comment>/larasaas/webhooks/stripe</comment> and exclude it from CSRF');
 
         $this->line('  4. Add <comment>Laravel\\Cashier\\Billable</comment> to your billable model (user, or workspace for workspace billing; see README Cashier setup)');
-        $this->line('  5. The Cashier customer columns are migrated onto the <comment>configured</comment> model table — after changing <comment>user_model</comment>/<comment>billing.*</comment>, run <comment>php artisan larasaas:doctor</comment> and follow its alerts');
+
+        if ($multiTenant) {
+            $this->line('  5. Create workspaces with <comment>LaraSaaS::createWorkspace()</comment> and manage teams via <comment>/app/workspaces</comment> (or the JSON API)');
+            $this->line('  6. Run <comment>php artisan larasaas:doctor</comment> whenever you change <comment>larasaas.user_model</comment> or the multi-tenant config');
+        } else {
+            $this->line('  5. Run <comment>php artisan larasaas:doctor</comment> whenever you change <comment>larasaas.user_model</comment> or other model config');
+        }
 
         foreach ($this->nextSteps($mode) as $i => $step) {
-            $this->line('  ' . ($i + 6) . ". {$step}");
+            $this->line('  ' . ($i + ($multiTenant ? 7 : 6)) . ". {$step}");
         }
 
         return self::SUCCESS;
     }
 
-    protected function publishMigrations(): void
+    /** The install-time multi-tenant choice — option, then interactive confirm. */
+    protected function resolveMultiTenant(): bool
+    {
+        if ($this->option('multi-tenant')) {
+            return true;
+        }
+
+        if ($this->option('no-multi-tenant')) {
+            return false;
+        }
+
+        return $this->components->confirm(
+            'Enable multi-tenant workspaces & team management (Owner/Admin/Member roles, invitations)?',
+            (bool) config('larasaas.multi_tenant.enabled'),
+        );
+    }
+
+    protected function publishMigrations(bool $multiTenant): void
     {
         $directory = database_path('migrations');
-        $filename = '2026_10_14_000000_create_larasaas_schema.php';
-        if (glob($directory . '/*_create_larasaas_schema.php')) {
-            $this->components->info('LaraSaaS schema migration already published (left unchanged).');
 
-            return;
+        // filename => glob detecting a previously published copy (renamed timestamp included)
+        $files = [
+            '2026_10_14_000000_create_larasaas_schema.php' => '*_create_larasaas_schema.php',
+        ];
+
+        if ($multiTenant) {
+            $files['2026_10_14_000001_create_larasaas_workspaces_schema.php'] = '*_create_larasaas_workspaces_schema.php';
         }
+
         if (! is_dir($directory)) {
             mkdir($directory, 0755, true);
         }
-        copy(__DIR__ . '/../../database/migrations/' . $filename, $directory . '/' . $filename);
-        $this->components->twoColumnDetail('Published one LaraSaaS schema migration', '<fg=green>DONE</>');
+
+        $published = 0;
+
+        foreach ($files as $filename => $pattern) {
+            if (glob($directory . '/' . $pattern) !== []) {
+                $this->components->info("LaraSaaS migration [{$filename}] already published (left unchanged).");
+
+                continue;
+            }
+
+            copy(__DIR__ . '/../../database/migrations/' . $filename, $directory . '/' . $filename);
+            $published++;
+        }
+
+        if ($published > 0) {
+            $this->components->twoColumnDetail("Published {$published} LaraSaaS schema migration(s)", '<fg=green>DONE</>');
+        }
     }
 
     /**
-     * Publish Cashier's migrations (subscriptions & items). The stock
-     * `create_customer_columns` migration hardcodes `users` — the LaraSaaS
-     * schema migration adds the customer columns to the CONFIGURED table
-     * instead (see its Cashier section), so the stock file is skipped with a
-     * note. A host-owned copy that already exists is never touched; the
-     * doctor alerts when it targets the wrong table.
+     * Cashier's stock customer-columns migration hardcodes the `users` table
+     * and is NOT idempotent — freshly published it is also timestamped "now",
+     * so it runs AFTER the LaraSaaS baseline and would crash on duplicate
+     * columns. LaraSaaS's schema migration owns these columns on the
+     * configured billable table instead, so retire the Cashier copy (asking
+     * first) instead of running it blindly.
      */
-    protected function publishCashierMigrations(): void
+    protected function guardCashierCustomerColumns(): void
     {
-        if (! class_exists(\Laravel\Cashier\Cashier::class)) {
+        $files = glob(database_path('migrations/*create_customer_columns.php'));
+
+        if ($files === []) {
             return;
         }
 
-        $existedBefore = glob(database_path('migrations/*create_customer_columns*.php')) ?: [];
-
-        $this->callSilently('vendor:publish', ['--tag' => 'cashier-migrations']);
-        $this->components->twoColumnDetail('Published [cashier-migrations]', '<fg=green>DONE</>');
-
-        if ($existedBefore !== []) {
-            // A host-owned copy is already in place — never overwrite or delete
-            // it. The doctor alerts below flag it when it targets the wrong table.
-            return;
-        }
-
-        foreach (glob(database_path('migrations/*create_customer_columns*.php')) ?: [] as $path) {
-            unlink($path);
-        }
+        $table = 'users';
 
         try {
-            $table = (new \LaraSaaS\Support\BillingSchema)->billableTable();
-            $this->components->twoColumnDetail(
-                'Skipped Cashier [create_customer_columns] (LaraSaaS adds the columns)',
-                "<fg=green>DONE</> <fg=cyan>(table: {$table})</>",
-            );
-        } catch (\Throwable) {
-            $this->components->twoColumnDetail(
-                'Skipped Cashier [create_customer_columns] (LaraSaaS adds the columns)',
-                '<fg=green>DONE</>',
-            );
+            $class = config('larasaas.billing.billable', 'user') === 'workspace'
+                ? (config('larasaas.billing.workspace_model') ?: config('larasaas.multi_tenant.workspace_model'))
+                : config('larasaas.user_model', 'App\\Models\\User');
+
+            if (is_string($class) && $class !== '' && class_exists($class)) {
+                $table = (new $class)->getTable();
+            }
+        } catch (\Throwable $e) {
+            // Unresolvable config — the doctor will report it after install.
+        }
+
+        $this->components->warn(
+            "Cashier's customer-columns migration hardcodes the `users` table and is not idempotent, "
+            . "but LaraSaaS creates those columns on [{$table}] via its own schema migration (config-driven, safe to re-run)."
+        );
+
+        foreach ($files as $file) {
+            if ($this->components->confirm('Remove the published Cashier customer-columns migration (its columns are managed by the LaraSaaS migration)?', true)) {
+                unlink($file);
+                $this->components->twoColumnDetail('Removed ' . basename($file), '<fg=green>DONE</>');
+            } else {
+                $this->components->warn("Keep it only if it targets [{$table}] and runs before the LaraSaaS baseline — or delete it and rely on the LaraSaaS migration.");
+            }
         }
     }
 
-    /** Surface billing-schema problems right after migrating — loud on purpose. */
-    protected function warnAboutBillingSchema(): void
+    /** Surface config/schema drift (e.g. larasaas.user_model changed) right away. */
+    protected function reportSetupAlerts(): void
     {
-        $schema = new \LaraSaaS\Support\BillingSchema;
+        $issues = app(\LaraSaaS\Support\SetupDoctor::class)->issues();
 
-        try {
-            $problems = $schema->problems();
-        } catch (\Throwable) {
+        if ($issues === []) {
             return;
         }
 
-        foreach ($problems as $problem) {
-            $this->components->warn($problem);
-        }
+        $this->newLine();
+        $this->components->warn('LaraSaaS setup alerts (php artisan larasaas:doctor for details):');
 
-        if ($problems !== []) {
-            $this->components->warn('Run `php artisan larasaas:doctor` anytime to re-check (e.g. after changing larasaas.user_model).');
+        foreach ($issues as $issue) {
+            $this->line("  ⚠️  {$issue}");
         }
     }
 
-    protected function writeEnvMode(string $mode): void
+    protected function writeEnv(string $key, string $value): void
     {
         $path = $this->laravel->environmentFilePath();
 
         if (! is_file($path) || ! is_writable($path)) {
-            $this->components->warn("Could not write LARASAAS_INTEGRATION_MODE to {$path} — set it manually.");
+            $this->components->warn("Could not write {$key} to {$path} — set it manually.");
 
             return;
         }
 
         $content = file_get_contents($path);
-        $line    = 'LARASAAS_INTEGRATION_MODE=' . $mode;
+        $line    = $key . '=' . $value;
 
-        if (preg_match('/^LARASAAS_INTEGRATION_MODE=.*$/m', $content)) {
-            $content = preg_replace('/^LARASAAS_INTEGRATION_MODE=.*$/m', $line, $content);
+        if (preg_match('/^' . preg_quote($key, '/') . '=.*$/m', $content)) {
+            $content = preg_replace('/^' . preg_quote($key, '/') . '=.*$/m', $line, $content);
         } else {
             $content = rtrim($content) . PHP_EOL . PHP_EOL . $line . PHP_EOL;
         }
 
         file_put_contents($path, $content);
-        $this->components->twoColumnDetail('Set LARASAAS_INTEGRATION_MODE', '<fg=green>DONE</>');
+        $this->components->twoColumnDetail("Set {$key}", '<fg=green>DONE</>');
     }
 
     /** @return array<int, string> */

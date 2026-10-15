@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">LaraSaaS</h1>
   <p align="center"><strong>The drop-in SaaS engine for Laravel + React.</strong></p>
-  <p align="center">Stripe billing · workspaces &amp; teams · dynamic pricing · announcements · feature flags — plugged into <em>your</em> User model, your auth, your theme.</p>
+  <p align="center">Stripe billing · dynamic pricing · announcements · feature flags — plugged into <em>your</em> User model, your auth, your theme.</p>
   <p align="center">
     <a href="https://packagist.org/packages/hasan-deeba/larasaas"><img src="https://img.shields.io/packagist/v/hasan-deeba/larasaas.svg?style=flat-square" alt="Latest Version on Packagist"></a>
     <a href="https://packagist.org/packages/hasan-deeba/larasaas"><img src="https://img.shields.io/packagist/dt/hasan-deeba/larasaas.svg?style=flat-square" alt="Total Downloads"></a>
@@ -15,9 +15,9 @@
 LaraSaaS is a **composer package** (not a fork-the-repo starter kit). It adds everything a SaaS needs to an **existing** Laravel application without touching your authentication, your models or your design system:
 
 - **Your auth stays yours** — login/registration live in your project. LaraSaaS resolves the user model from `config('larasaas.user_model')` (`App\Models\User` by default) and never ships its own.
+- **🏢 Multi-tenant Workspaces** — seamless workspace management allowing users to operate within parallel organizational structures. Flip one config flag (`multi_tenant.enabled` / `LARASAAS_MULTI_TENANT`) to make your project multi-tenant — or keep it single-tenant with zero workspace overhead.
+- **👥 Team Management** — robust invitation system with granular workspace-level roles (Owner, Admin, Member): invite by e-mail, accept via token, promote/demote, revoke, and safe-guards like last-owner protection.
 - **Stripe Billing via Laravel Cashier** — subscription provisioning through Stripe Checkout, plan swaps with proration, cancel/resume, invoices, and the secure customer portal. Bill the **user** or a **workspace**.
-- **🏢 Multi-tenant Workspaces** - Seamless workspace management allowing users to operate within parallel organizational structures.
-- **👥 Team Management** - Robust invitation system with granular workspace-level roles (Owner, Admin, Member).
 - **Admin-managed plans** — create, edit and archive plans from your own dashboard using `LaraSaaS::createPlan()`, `updatePlan()` and `archivePlan()` (or use the optional shipped Inertia admin pages). Prices and typed feature values live in the database; developers define the feature catalog in config. The React and embed pricing tables follow automatically.
 - **Announcements system** — global broadcasts with colored typings, scheduling windows, audience targeting, CTAs and per-user dismissible persistence.
 - **Feature flags via Laravel Pennant** — database-driven toggles with percentage rollouts, workspace targeting and e-mail targeting, all declared in config.
@@ -207,16 +207,18 @@ The manager works regardless of mode — the mode only controls which ready-made
 ## Installation
 
 ```bash
-composer require hasan-deeba/larasaas:^3.0
-php artisan larasaas:install            # asks which integration mode you need
-# php artisan larasaas:install --mode=api    # or pick it up front:
-# php artisan larasaas:install --mode=embed
+composer require hasan-deeba/larasaas:^4.0
+php artisan larasaas:install            # asks which integration mode + whether the project is multi-tenant
+# php artisan larasaas:install --mode=api --no-multi-tenant    # or pick it up front:
+# php artisan larasaas:install --mode=embed --multi-tenant
 # php artisan larasaas:install --mode=inertia
 ```
 
-LaraSaaS follows semantic versioning: pin the **major** version in your project (`^1.0` for the 1.x line) instead of `*`, so `composer update` only ever brings you non-breaking minor/patch releases. If you deliberately want the newest `main` build, install with `hasan-deeba/larasaas:@dev`.
+LaraSaaS follows semantic versioning: pin the **major** version in your project (`^4.0` for the 4.x line) instead of `*`, so `composer update` only ever brings you non-breaking minor/patch releases. If you deliberately want the newest `main` build, install with `hasan-deeba/larasaas:@dev`.
 
-The install command asks for your [integration mode](#which-integration-is-right-for-you) and writes it to `.env` as `LARASAAS_INTEGRATION_MODE`, then publishes the config, **one consolidated LaraSaaS migration**, and translations (plus the React components in `inertia`/`all` mode), publishes Cashier's own migrations separately, and (optionally) runs the migrations. The LaraSaaS migration creates plans, announcements, dismissals and the workspace/team tables; it inserts **no sample plans**. It also adds Cashier's customer columns (`stripe_id`, `pm_type`, `pm_last_four`, `trial_ends_at`) to the table of the **configured** user/workspace model — never a hardcoded `users` table — so the stock Cashier `create_customer_columns` migration (which hardcodes `users`) is deliberately skipped by the installer. Pennant owns its feature-flag storage. Migrations are published, not auto-loaded from vendor. Migrations are published, not auto-loaded from vendor. Re-running the installer does not overwrite LaraSaaS migrations, even with `--force`. The repository contains only `database/migrations/2026_10_14_000000_create_larasaas_schema.php`, with every LaraSaaS table and column defined directly. There are no legacy/add-column/upgrade migrations.
+The install command asks for your [integration mode](#which-integration-is-right-for-you) and whether the project is **multi-tenant**, writes `LARASAAS_INTEGRATION_MODE` and `LARASAAS_MULTI_TENANT` to `.env`, then publishes the config, **the consolidated LaraSaaS schema migration** (plus the workspace/team migration for multi-tenant installs), and translations (plus the React components in `inertia`/`all` mode), publishes Cashier's own migrations separately, and (optionally) runs the migrations. The LaraSaaS migration creates plans, announcements, dismissals, setup stamps and the Cashier **customer columns on the table of your configured model** (`larasaas.user_model` — or the workspace model for workspace billing — never a hardcoded `users` table); it inserts **no sample plans**. Pennant owns its feature-flag storage: it is not folded into LaraSaaS's migration. Migrations are published, not auto-loaded from vendor. Re-running the installer does not overwrite LaraSaaS migrations, even with `--force`. The repository contains `database/migrations/2026_10_14_000000_create_larasaas_schema.php` (single-tenant baseline) and `database/migrations/2026_10_14_000001_create_larasaas_workspaces_schema.php` (published only for multi-tenant installs), with every LaraSaaS table and column defined directly. There are no legacy/add-column/upgrade migrations.
+
+Because the schema is tied to the model in config, **`php artisan larasaas:doctor` alerts you whenever that model changes after migrating** (a one-time log warning is also written on boot): it compares the model/table the migrations were run for against the current config and tells you exactly which table holds the billing columns.
 
 ### Cashier setup
 
@@ -249,19 +251,15 @@ the correct customers:
 // For custom user billing, use your configured user model class instead.
 ```
 
-#### Customer columns follow your configured model
-
-Cashier's customer columns (`stripe_id`, `pm_type`, `pm_last_four`, `trial_ends_at`) are added by the LaraSaaS schema migration to the table of the model configured in `config/larasaas.php` — `user_model` for user billing, `billing.workspace_model` (falling back to `workspaces.model`) for workspace billing. They are **never hardcoded to `users`**. The stock Cashier `create_customer_columns` migration does hardcode `users`, so `larasaas:install` skips it on purpose (a host-owned copy you published earlier is never touched — `larasaas:doctor` alerts when it targets the wrong table). The subscription tables still come from Cashier's own migrations.
-
-##### Changing the configured model (read this!)
-
-The columns are migrated to whatever table the config resolves **at migrate time**. If you change `user_model` (or `billing.billable` / `billing.workspace_model`) **after** running migrations, the columns stay behind on the previous model's table and billing breaks. The package watches for exactly this:
-
-- `php artisan larasaas:doctor` — prints an alert like `⚠ CONFIG CHANGED? The Cashier customer columns live on [users], but ... now resolve [App\Models\Member] → table [members]` and tells you what to do. Run it after every config change.
-- `php artisan larasaas:install` re-checks right after migrating and warns loudly when anything is off.
-- `LaraSaaS::billingSchemaProblems()` exposes the same alerts to your own dashboard/health checks (empty array = healthy).
-
-To fix a change: copy the columns to the new table with a small migration (`$table->string('stripe_id')->nullable()->index(); $table->string('pm_type')->nullable(); $table->string('pm_last_four', 4)->nullable(); $table->timestamp('trial_ends_at')->nullable();`) — or move them with raw SQL — then re-run `larasaas:doctor` until it is quiet. `down()` of the LaraSaaS schema migration never drops these columns from host tables: it does not destroy billing data.
+Make sure Cashier's customer columns (`stripe_id`, `pm_type`, `pm_last_four`,
+`trial_ends_at`) exist on the billable model's table. **LaraSaaS's schema
+migration adds them to whatever table the configured model uses** — the
+configured `larasaas.user_model` for user billing, the configured workspace
+model for workspace billing — and it is idempotent, so it coexists with
+Cashier's published migrations. Cashier's stock customer-columns migration
+hardcodes `users`; when your billable table is not `users`, the installer
+warns you and offers to remove that file (LaraSaaS manages those columns).
+`php artisan larasaas:doctor` reports any missing columns or config drift.
 
 Without the trait, calls such as `subscription()` and `subscribed()` cannot
 work. LaraSaaS now reports a setup error identifying the model rather than an
@@ -338,109 +336,6 @@ Money v4.8+ supports PHP 8.5. If composer lists "your php version (8.5.x) does n
 
 Stable versions are published as git tags (e.g. `v1.0.0`). If no version matching your constraint exists yet, check the [releases page](https://github.com/hasan-deeba/LaraSaaS/releases) — or install the dev build with `@dev` until the next tag is pushed.
 
-## 🏢 Multi-tenant Workspaces & 👥 Team Management
-
-Seamless workspace management allowing users to operate within parallel organizational structures — with a robust invitation system and granular workspace-level roles (**Owner**, **Admin**, **Member**). The engine ships first-party models and a validated manager; your dashboard (or the JSON API) drives it, and you decide who may do what.
-
-### Schema & models
-
-The baseline migration creates three tables (no foreign keys to your user table — it references the configured `user_model`, like the rest of the package):
-
-| Table | Purpose |
-|-------|---------|
-| `larasaas_workspaces` | `name`, unique `slug`, `owner_id` (the owner is mirrored on the members table) |
-| `larasaas_workspace_members` | `workspace_id` + `user_id` + `role` (`owner`/`admin`/`member`), unique per pair |
-| `larasaas_workspace_invitations` | `email`, `role`, unique `token`, `expires_at`, `accepted_at`, `invited_by` |
-
-`LaraSaaS\Models\Workspace`, `WorkspaceMember` and `WorkspaceInvitation` are the defaults; swap them for your own Eloquent models via `workspaces.model` / `member_model` / `invitation_model` if you need custom tables.
-
-### Granular roles
-
-| Permission | Owner | Admin | Member |
-|-----------|:-----:|:-----:|:------:|
-| `workspace.update` (rename, slug) | ✅ | ✅ | — |
-| `workspace.delete` | ✅ | — | — |
-| `workspace.billing` | ✅ | — | — |
-| `members.view` | ✅ | ✅ | ✅ |
-| `members.invite` | ✅ | ✅ | — |
-| `members.update` (change roles) | ✅ | ✅ | — |
-| `members.remove` | ✅ | ✅ | — |
-| `invitations.view` | ✅ | ✅ | — |
-| `invitations.manage` | ✅ | ✅ | — |
-| `ownership.transfer` | ✅ | — | — |
-
-Roles can be loosened/tightened per role via `workspaces.role_permissions`; `workspaces.assignable_roles` controls which roles invitations/role-changes may grant (`admin`, `member` by default — **owner is transfer-only**). Structural invariants are enforced server-side: the owner can never be demoted or removed without transferring ownership first, and a transfer promotes the successor to Owner while the previous owner stays on as Admin.
-
-### Host user model — opt in with `HasWorkspaces`
-
-LaraSaaS never edits your models. Add the trait yourself:
-
-```php
-use LaraSaaS\Concerns\HasWorkspaces;
-
-class User extends Authenticatable
-{
-    use HasWorkspaces; // + Billable if you bill users
-}
-```
-
-You get `workspaces()`, `ownedWorkspaces()`, `workspaceMemberships()`, `currentWorkspace()` (session-aware, falls back to the first membership — perfect for `billing.workspace_resolver`), `switchWorkspace()`, `isMemberOf()`, `roleIn()` and `canInWorkspace()`.
-
-### Manager API (any dashboard, command or seeder)
-
-Host controllers authorize the caller; `WorkspaceManager` validates and enforces the invariants (same pattern as `createPlan()`):
-
-```php
-use LaraSaaS\Support\WorkspaceManager;
-
-$workspaces = app(WorkspaceManager::class);
-
-$workspace  = $workspaces->create(['name' => 'Acme Inc'], $user);        // owner + owner membership
-$invite     = $workspaces->invite($workspace, 'teammate@acme.test', 'admin', $user);
-$membership = $workspaces->acceptByToken($invite->token, $teammate);     // e-mail must match (configurable)
-$workspaces->updateMemberRole($workspace, $teammate, 'member');
-$workspaces->removeMember($workspace, $teammate);
-$workspaces->transferOwnership($workspace, $successor);
-$workspaces->cancelInvitation($invite);  // or resendInvitation($invite)
-```
-
-Or the `LaraSaaS` facade: `createWorkspace()`, `inviteToWorkspace()`, `acceptWorkspaceInvitation()`, `workspacesFor($user)`. Invitation tokens are 64-char random strings; `acceptUrl()` gives you the link to e-mail (delivery is yours — the package sends no mail). Default expiry is `workspaces.invitation_ttl_days` (7).
-
-### JSON API (all non-`custom` integration modes)
-
-Every route lives under `route.api_prefix` (default `/api/larasaas`) and answers with the `{"data": …}` envelope. `{workspace}` accepts an **id or slug**.
-
-| Method | Endpoint | Who | Purpose |
-|--------|----------|-----|---------|
-| `GET` | `/workspaces` | any user | My workspaces + my role/permissions |
-| `POST` | `/workspaces` | any user | Create a workspace (caller becomes Owner) |
-| `GET` | `/workspaces/{workspace}` | members | Roster + role; pending/accepted invitations for `invitations.view` |
-| `PATCH` | `/workspaces/{workspace}` | `workspace.update` | Rename / change slug |
-| `DELETE` | `/workspaces/{workspace}` | `workspace.delete` | Delete workspace + team |
-| `GET` | `/workspaces/{workspace}/invitations` | `invitations.view` | Invitation history (with `pending` flags) |
-| `POST` | `/workspaces/{workspace}/invitations` | `members.invite` | Invite an e-mail (`email`, `role`) |
-| `DELETE` | `/workspaces/{workspace}/invitations/{invitation}` | `invitations.manage` | Revoke an invitation |
-| `POST` | `/workspaces/invitations/{token}/accept` | invited user | Accept an invitation |
-| `PATCH` | `/workspaces/{workspace}/members/{member}` | `members.update` | Change a member's role |
-| `DELETE` | `/workspaces/{workspace}/members/{member}` | `members.remove` | Remove a member |
-| `POST` | `/workspaces/{workspace}/transfer` | `ownership.transfer` | Transfer ownership (`user_id`) |
-
-For your own routes, the package registers `larasaas.workspace` (member-only), `larasaas.workspace.can:members.invite,…` (any listed permission) and `larasaas.workspace.role:admin` (role at or above).
-
-### Workspace billing
-
-Combine both features — one subscription per workspace:
-
-```php
-'billing' => [
-    'billable' => 'workspace',
-    'workspace_model' => \LaraSaaS\Models\Workspace::class, // or your own model
-    'workspace_resolver' => fn ($user) => $user->currentWorkspace(),
-],
-```
-
-Add `Billable` to the workspace model and register it with `Cashier::useCustomerModel(...)`. The Cashier customer columns are then migrated onto the workspace table automatically (see [Customer columns follow your configured model](#customer-columns-follow-your-configured-model)).
-
 ## Configuration highlights
 
 Integration settings and developer feature definitions live in `config/larasaas.php`; plan records live in the database:
@@ -455,26 +350,36 @@ Integration settings and developer feature definitions live in `config/larasaas.
     'embed' => ['frame_ancestors' => ['*'], 'token_ttl' => 60],
 ],
 
-// Which model represents your users (login/register stay in YOUR app)
-'user_model' => App\Models\User::class,
-// 'user_model' => App\Models\Member::class, // anything Eloquent
+// Which model represents your users (login/register stay in YOUR app).
+// Migrations follow this model: the Cashier customer columns are created on
+// ITS table (never a hardcoded `users` table). Change it later? Run
+// `php artisan larasaas:doctor` - it alerts you about any config/schema drift.
+'user_model' => App\\Models\\User::class,
+// 'user_model' => App\\Models\\Member::class, // anything Eloquent
+
+// Is this project multi-tenant? Workspaces (parallel organizations) and the
+// team management surface (invitations, Owner/Admin/Member roles) only exist
+// when enabled. See "Multi-tenant workspaces & team management".
+'multi_tenant' => [
+    'enabled' => (bool) env('LARASAAS_MULTI_TENANT', false),
+    'workspace_model'  => \\LaraSaaS\\Models\\Workspace::class,
+    'membership_model' => \\LaraSaaS\\Models\\WorkspaceMember::class,
+    'invitation_model' => \\LaraSaaS\\Models\\WorkspaceInvitation::class,
+    'roles' => [
+        'owner'  => ['label' => 'Owner',  'implies' => ['admin', 'member']],
+        'admin'  => ['label' => 'Admin',  'implies' => ['member']],
+        'member' => ['label' => 'Member', 'implies' => []],
+    ],
+    'default_role'            => 'member',
+    'invitation_expires_days' => 7,
+    'strict_invitation_email' => true,
+],
 
 // Bill the user or a workspace per-subscription
 'billing' => [
     'billable' => 'workspace',
     'workspace_model' => App\Models\Workspace::class,
     'workspace_resolver' => fn ($user) => $user->currentWorkspace(),
-],
-
-// 🏢👥 Multi-tenant workspaces & team management
-'workspaces' => [
-    'model'            => \LaraSaaS\Models\Workspace::class,   // swap for your own Eloquent model
-    'member_model'     => \LaraSaaS\Models\WorkspaceMember::class,
-    'invitation_model' => \LaraSaaS\Models\WorkspaceInvitation::class,
-    'assignable_roles' => ['admin', 'member'],                 // owner is transfer-only
-    'invitation_ttl_days' => 7,
-    'invite_by_email'  => true,
-    'role_permissions' => [],                                  // per-role permission overrides
 ],
 
 // Developers define capabilities and types; admins assign values to plans.
@@ -506,6 +411,76 @@ Integration settings and developer feature definitions live in `config/larasaas.
     'labs'          => ['resolve' => fn ($scope) => $scope?->isFounder()],
 ],
 ```
+
+## Multi-tenant workspaces & team management
+
+LaraSaaS can run your product as **multi-tenant** — users operate within parallel workspaces (organizations, teams, companies), each with its own team, granular roles and (optionally) its own subscription. The choice lives in config, so the same package powers single-tenant and multi-tenant products:
+
+```php
+'multi_tenant' => [
+    'enabled' => (bool) env('LARASAAS_MULTI_TENANT', false), // ← your choice
+    'workspace_model'  => \LaraSaaS\Models\Workspace::class,
+    'membership_model' => \LaraSaaS\Models\WorkspaceMember::class,
+    'invitation_model' => \LaraSaaS\Models\WorkspaceInvitation::class,
+    'roles' => [
+        'owner'  => ['label' => 'Owner',  'implies' => ['admin', 'member']],
+        'admin'  => ['label' => 'Admin',  'implies' => ['member']],
+        'member' => ['label' => 'Member', 'implies' => []],
+    ],
+    'default_role'            => 'member',
+    'invitation_expires_days' => 7,
+    'strict_invitation_email' => true,
+],
+```
+
+`php artisan larasaas:install` asks the question up front (or take `--multi-tenant` / `--no-multi-tenant`) and writes `LARASAAS_MULTI_TENANT` to `.env`. With the flag **off**, no workspace routes, tables or features exist — the package behaves as a pure single-tenant product. With the flag **on**, the workspace schema is migrated and the whole surface appears.
+
+### Workspaces
+
+Users can belong to many workspaces; each workspace has a name, a unique slug and an owner. Everything is driven by the manager/facade (works in every integration mode) or by the ready-made HTTP surface:
+
+```php
+$workspace = LaraSaaS::createWorkspace($user, ['name' => 'Acme Inc']);  // creator becomes Owner
+LaraSaaS::workspacesFor($user);       // every workspace the user belongs to
+LaraSaaS::currentWorkspaceFor($user); // the most recently joined one
+```
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `GET` | `/api/larasaas/workspaces` | The user's workspaces (with their role in each) |
+| `POST` | `/api/larasaas/workspaces` | Create a workspace (`name`, optional `slug`) — creator becomes Owner |
+| `GET` | `/api/larasaas/workspaces/{id}` | Workspace detail with members (and invitations for managers) |
+| `GET` | `/api/larasaas/workspaces/{id}/members` | Members and their roles |
+
+In `inertia`/`all` mode the same data is served by the shipped `/app/workspaces` and `/app/workspaces/{id}` React pages.
+
+### Team management — invitations & granular roles
+
+Roles are **workspace-level** and granular: **Owner**, **Admin**, **Member**. Owners manage everything (roles included), Admins manage members and invitations, Members participate. Role implications are configurable (`admin` implies `member`, …), and safety rules are enforced server-side: the last Owner can never be demoted or removed, Admins cannot touch Owners or other Admins, and ownership follows a surviving Owner when the primary one leaves.
+
+The invitation system is e-mail based: Owners/Admins invite an address with a role, invitees accept through a unique expiring token (e-mail matching enforced by default), and pending invitations can be revoked at any time.
+
+```php
+$invitation = LaraSaaS::inviteMember($workspace, $actor, 'teammate@company.com', 'admin');
+LaraSaaS::acceptInvitation($invitation->token, $user);      // or pass the model
+LaraSaaS::changeMemberRole($workspace, $actor, $user, 'admin'); // Owners only
+LaraSaaS::removeMember($workspace, $actor, $user);
+LaraSaaS::hasWorkspaceRole($workspace, $user, 'admin');     // honours role implications
+```
+
+| Method | Endpoint | Purpose |
+|--------|----------|---------|
+| `POST` | `/api/larasaas/workspaces/{id}/invitations` | Invite an e-mail (`email`, `role`) |
+| `GET` | `/api/larasaas/workspaces/{id}/invitations` | List invitations (Owners/Admins) |
+| `DELETE` | `/api/larasaas/workspaces/{id}/invitations/{invitation}` | Revoke a pending invitation |
+| `GET` | `/api/larasaas/invitations/{token}` | Preview an invitation |
+| `POST` | `/api/larasaas/invitations/{token}/accept` | Accept and join the workspace |
+| `PUT` | `/api/larasaas/workspaces/{id}/members/{user}/role` | Change a member's role (Owners) |
+| `DELETE` | `/api/larasaas/workspaces/{id}/members/{user}` | Remove a member |
+
+### Workspace billing
+
+Combine multi-tenancy with `billing.billable = workspace` to give **each workspace its own subscription**. With no custom `workspace_resolver`, LaraSaaS resolves the billable workspace from the team tables (the user's most recently joined workspace); override with `billing.workspace_resolver` or a `currentWorkspace()` method on your user model when you need something else. The workspace model then needs Cashier's `Billable` trait (extend the shipped `LaraSaaS\Models\Workspace` or swap `multi_tenant.workspace_model`), and the customer columns are created on **its** table — again never a hardcoded `users` table.
 
 ## Admin-managed plans and developer-defined features
 
@@ -590,15 +565,17 @@ $limit = LaraSaaS::entitlement($request, 'storage_gb'); // 10, 100, -1, or 0
 
 These helpers **do not track, reserve or deduct usage**, nor upload files. Your application owns usage accounting and must use transactional locking/reservations to prevent simultaneous uploads exceeding a quota. For multi-item subscriptions, add application-specific entitlement resolution; the built-in helper maps the subscription's single `stripe_price`.
 
-### Schema baseline and version 3
+### Schema baseline and version 4
 
-Version 3 intentionally removes the unused legacy/additive migration paths and ships **one** LaraSaaS table-creation migration. Fresh projects run `php artisan larasaas:install --mode=YOUR_MODE --migrate`; define your feature catalog and create real plans through your dashboard. Plans are database records, not config entries or hard-coded sample rows.
+Version 4 keeps the migration philosophy of v3 (no legacy/additive paths) and ships **two** table-creation migrations: the single-tenant baseline (`2026_10_14_000000_create_larasaas_schema.php` — plans, announcements, dismissals, setup stamps and the config-driven Cashier customer columns) and the optional multi-tenant workspace schema (`2026_10_14_000001_create_larasaas_workspaces_schema.php` — workspaces, members, invitations; published only when the project is multi-tenant). Fresh projects run `php artisan larasaas:install --mode=YOUR_MODE --migrate`; define your feature catalog and create real plans through your dashboard. Plans are database records, not config entries or hard-coded sample rows.
 
-The consolidated migration keeps the same filename/schema as the 2.0 fresh-install baseline. A project that already published that baseline can keep it; no extra migration is needed. Re-running the installer preserves that file, including host edits and renamed timestamps, even with `--force`.
+The baseline migration keeps the same filename/schema as the 2.0/3.0 fresh-install baseline, so a project that already published it can keep it. Re-running the installer preserves published files, including host edits and renamed timestamps, even with `--force`.
+
+The **customer columns follow your config**: they are created on the table of the configured `larasaas.user_model` (or the configured workspace model for workspace billing) — never on a hardcoded `users` table. The migration stamps which model/table it built for in `larasaas_settings`, and `php artisan larasaas:doctor` alerts you (console + one-time boot log warning) whenever the model in config drifts from what the database was migrated for.
 
 There is **no automatic upgrade from the older split migrations** in this release. If experimenting with an older version in a disposable, unused app, reset that development database and remove only the old LaraSaaS migration files before installing the baseline. Never run a fresh baseline over existing tables or reset a database containing real data. Existing deployments with split migrations need an explicitly reviewed host migration plan; keep the old package version until that is prepared.
 
-For an existing baseline installation, update Composer's constraint to `^3.0`, review published config/views/components, clear Laravel caches, and rebuild any changed frontend assets. Back up customizations before force-publishing assets. Billing routes remain authenticated; only pricing is public.
+For an existing baseline installation, update Composer's constraint to `^4.0`, review published config/views/components, clear Laravel caches, and rebuild any changed frontend assets. Back up customizations before force-publishing assets. Billing routes remain authenticated; only pricing is public. Already-migrated 3.x installs that want the new stamps/columns/workspace tables should follow whatever `php artisan larasaas:doctor` reports.
 
 ## Release and deployment
 
@@ -662,8 +639,10 @@ This repository **is** the composer package — `composer.json` sits at the root
 composer.json          the package manifest (auto-discovery wired)
 config/                larasaas.php — every knob, documented
 src/                   PHP namespace LaraSaaS (PSR-4)
-routes/                web.php, api.php, webhook.php
-database/migrations/   one migration: plans, announcements and dismissals
+routes/                web.php, api.php, workspaces-*.php, webhook.php
+database/migrations/   two migrations: the baseline (plans, announcements,
+                       dismissals, settings, config-driven billing columns)
+                       and the optional multi-tenant workspace/team schema
 resources/js/          React components & Inertia pages (published into host apps)
 resources/lang/        EN / FR / AR translations
 resources/views/       Inertia fallback root view + standalone embed pages
