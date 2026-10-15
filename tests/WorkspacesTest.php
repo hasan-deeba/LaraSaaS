@@ -235,9 +235,11 @@ class WorkspacesTest extends TestCase
         $owner = $this->user();
         $workspace = $this->manager()->create(['name' => 'Acme'], $owner);
         $invitation = $this->manager()->invite($workspace, 'teammate@example.com');
+        $previousToken = $invitation->token;
 
         $resent = $this->manager()->resendInvitation($invitation);
-        $this->assertNotSame($invitation->token, $resent->fresh()->token);
+        $this->assertNotSame($previousToken, $resent->token);
+        $this->assertTrue($resent->isPending());
 
         $this->manager()->cancelInvitation($resent);
         $this->assertSame(0, WorkspaceInvitation::query()->count());

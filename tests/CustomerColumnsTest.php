@@ -144,11 +144,12 @@ class CustomerColumnsTest extends TestCase
         config(['larasaas.user_model' => \App\Models\Member::class]); // ⚠ changed AFTER migrating
 
         $problems = app(BillingSchema::class)->problems();
-        $this->assertNotEmpty($problems);
-        $this->assertStringContainsString('CONFIG CHANGED?', $problems[0]);
-        $this->assertStringContainsString('[users]', $problems[0]);
-        $this->assertStringContainsString('[members]', $problems[0]);
-        $this->assertStringContainsString('user_model', $problems[0]);
+        $joined = implode(' || ', $problems); // visible in assertion output
+        $this->assertNotEmpty($problems, 'problems() was empty');
+        $this->assertStringContainsString('CONFIG CHANGED?', $joined, "problems: {$joined}");
+        $this->assertStringContainsString('[users]', $joined, "problems: {$joined}");
+        $this->assertStringContainsString('[members]', $joined, "problems: {$joined}");
+        $this->assertStringContainsString('user_model', $joined, "problems: {$joined}");
 
         $this->artisan('larasaas:doctor')->assertFailed();
     }

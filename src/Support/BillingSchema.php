@@ -94,24 +94,56 @@ class BillingSchema
     {
         $tables = [];
 
-        try {
-            foreach (Schema::getTables() as $table) {
-                $name = is_array($table) ? ($table['name'] ?? null) : ($table->name ?? null);
-
-                if (! is_string($name) || ! Schema::hasTable($name)) {
+        foreach ($this->databaseTables() as $name) {
+            try {
+                if (! Schema::hasTable($name)) {
                     continue;
                 }
 
                 if (Schema::hasColumn($name, 'stripe_id') && Schema::hasColumn($name, 'trial_ends_at')) {
                     $tables[] = $name;
                 }
+            } catch (\Throwable) {
+                // One unreadable table must not kill the drift scan.
             }
-        } catch (\Throwable) {
-            // Schema introspection is best-effort — the doctor still reports
-            // missing columns on the resolved table without the drift scan.
         }
 
         return $tables;
+    }
+
+    /** @return array<int, string> Table names, best-effort across Laravel versions/drivers. */
+    protected function databaseTables(): array
+    {
+        $names = [];
+
+        try {
+            foreach (Schema::getTables() as $table) {
+                $name = is_array($table)
+                    ? ($table['name'] ?? null)
+                    : (is_object($table) ? ($table->name ?? null) : $table);
+
+                if (is_string($name) && $name !== '') {
+                    $names[] = str_contains($name, '.') ? substr($name, (int) strrpos($name, '.') + 1) : $name;
+                }
+            }
+        } catch (\Throwable) {
+            // Fall through to the looser listings below.
+        }
+
+        try {
+            foreach ((array) Schema::getTables() as $table) {
+                if (is_object($table)) {
+                    $first = reset((array) $table);
+                    if (is_string($first) && $first !== '') {
+                        $names[] = $first;
+                    }
+                }
+            }
+        } catch (\Throwable) {
+            // Best-effort only.
+        }
+
+        return array_values(array_unique($names));
     }
 
     /**
@@ -147,7 +179,7 @@ class BillingSchema
 
             if ($others !== []) {
                 $problems[] = '⚠ CONFIG CHANGED? The Cashier customer columns (' . implode(', ', $this->requiredColumns()) . ') live on ['
-                    . implode('], [', $others) . '], but `larasaas.billing.billable`/`larasaas.user_model` now resolve [{$model}] → table [{$table}] '
+                    . implode('], [', $others) . '], but `larasaas.billing.billable`/`larasaas.user_model` now resolve [' . $model . '] → table [' . $table . '] '
                     . '(missing here: ' . implode(', ', $missing) . '). '
                     . 'If you changed the model in config after migrating, the columns were left on the previous model\'s table: '
                     . 'move them (see README "Changing the configured model") or revert the config.';
