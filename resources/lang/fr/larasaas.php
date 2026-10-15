@@ -85,4 +85,39 @@ return [
         'not_authenticated' => 'Ce lien d’intégration est absent ou expiré. Demandez à l’application hôte d’en générer un nouveau via LaraSaaS::embedUrl().',
         'powered_by'        => 'Sécurisé par :app',
     ],
+
+    'workspaces' => [
+        'title'        => 'Espaces de travail',
+        'subtitle'     => 'Travaillez dans des structures organisationnelles parallèles — chaque espace a sa propre équipe, ses rôles et sa facturation.',
+        'create'       => 'Créer un espace de travail',
+        'name'         => 'Nom',
+        'slug'         => 'Slug URL (optionnel)',
+        'empty'        => 'Aucun espace pour le moment — créez le premier ci-dessus.',
+        'manage_team'  => 'Gérer l\'équipe',
+        'roles' => [
+            'owner'  => 'Propriétaire',
+            'admin'  => 'Administrateur',
+            'member' => 'Membre',
+        ],
+    ],
+
+    'teams' => [
+        'title'          => 'Équipe',
+        'subtitle'       => 'Rôles granulaires au niveau de l\'espace — Propriétaire, Administrateur, Membre — et invitations.',
+        'back'           => 'Tous les espaces de travail',
+        'members'        => 'Membres',
+        'remove'         => 'Retirer',
+        'remove_confirm' => 'Retirer ce membre de l\'espace de travail ?',
+        'invitations'    => 'Invitations',
+        'invite_email'   => 'Adresse e-mail',
+        'role'           => 'Rôle',
+        'send_invite'    => 'Envoyer l\'invitation',
+        'no_invitations' => 'Aucune invitation pour le moment.',
+        'accepted'       => 'Acceptée',
+        'pending'        => 'En attente',
+        'expired'        => 'Expirée',
+        'revoke'         => 'Révoquer',
+        'revoke_confirm' => 'Révoquer cette invitation ?',
+    ],
+
 ];
