@@ -18,10 +18,18 @@
 
 ## Migrations and upgrades
 
-- `database/migrations/2026_10_14_000000_create_larasaas_schema.php` is the only package migration. Define all LaraSaaS tables/columns directly in it for this unused baseline; do not restore legacy/additive migrations.
-- `larasaas:install` publishes the baseline without overwriting host files, including renamed timestamps. Migrations are not auto-loaded from vendor. Cashier retains its own migrations.
+- `database/migrations/2026_10_14_000000_create_larasaas_schema.php` is the single-tenant baseline (plans, announcements, dismissals, `larasaas_settings` stamps, config-driven customer columns). `database/migrations/2026_10_14_000001_create_larasaas_workspaces_schema.php` is the optional multi-tenant workspace/team schema, published only for multi-tenant installs. Define all LaraSaaS tables/columns directly in these files; do not restore legacy/additive migrations.
+- **Migrations never hardcode host tables.** The customer columns land on the table of the configured billable model (`larasaas.user_model`, or the workspace model for workspace billing) and are idempotent (`hasColumn` guards). `larasaas:install` retires Cashier's stock `create_customer_columns` migration (hardcoded `users`, not idempotent) after confirmation. `larasaas_settings` stamps which model/table the schema was built for; `SetupDoctor` + `larasaas:doctor` alert when config drifts (e.g. `larasaas.user_model` changed after migrating). Never regress to `Schema::table('users', …)`.
+- `larasaas:install` publishes the migrations without overwriting host files, including renamed timestamps, and only publishes the workspace schema when the project is multi-tenant (`--multi-tenant` / `--no-multi-tenant` / interactive question → `LARASAAS_MULTI_TENANT`). Migrations are not auto-loaded from vendor.
 - No automatic upgrade from old split migrations is shipped. Never drop/recreate real host data. A future deployed-schema upgrade needs an explicit migration strategy.
 - Plan writes belong in `Support/PlanManager`, exposed by the manager/facade (`createPlan`, `updatePlan`, `archivePlan`). Reuse its validation in the optional admin UI; host controllers own authorization. Embeds are for customer pricing/billing, never admin forms.
+
+## Multi-tenant workspaces & teams
+
+- `multi_tenant.enabled` is THE single-tenant/multi-tenant switch. When off, no workspace routes, tables or features exist. When on, `larasaas_workspaces` / `larasaas_workspace_members` / `larasaas_workspace_invitations` power workspaces, granular roles (Owner, Admin, Member with configurable `implies`) and e-mail invitations.
+- Workspace/team domain rules live in `Support/WorkspaceManager` (role checks, last-owner protection, invitation lifecycle) and are enforced server-side; controllers stay thin and hosts own authentication. `Support/WorkspacePresenter` is the single serialization shape for web + API.
+- Model classes are host-swappable via `multi_tenant.workspace_model` / `membership_model` / `invitation_model` (custom models should extend the shipped ones). Route params are resolved manually through the configured classes — never hardcoded type-hints.
+- Workspace billing resolves the billable via `billing.workspace_resolver`, the user's `currentWorkspace()`, or — for multi-tenant installs — the most recently joined workspace. The workspace model must use Cashier's `Billable`.
 
 ## Verification
 

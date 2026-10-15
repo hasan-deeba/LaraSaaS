@@ -30,6 +30,7 @@ class LaraSaaSServiceProvider extends ServiceProvider
         $this->registerPennantFeatures();
         $this->registerMiddleware();
         $this->registerCommands();
+        $this->alertOnConfigDrift();
     }
 
     protected function registerRoutes(): void
@@ -55,8 +56,13 @@ class LaraSaaSServiceProvider extends ServiceProvider
                 'prefix'     => config('larasaas.route.prefix', 'app'),
                 'middleware' => config('larasaas.route.middleware', ['web', 'auth']),
                 'as'         => config('larasaas.route.name_prefix', 'larasaas.'),
-            ], function () {
+            ], function () use ($larasaas) {
                 $this->loadRoutesFrom(__DIR__ . '/../routes/web.php');
+
+                // Workspaces & teams — only for multi-tenant installs.
+                if ($larasaas->multiTenant()) {
+                    $this->loadRoutesFrom(__DIR__ . '/../routes/workspaces-web.php');
+                }
             });
         }
 
@@ -79,8 +85,13 @@ class LaraSaaSServiceProvider extends ServiceProvider
                 'prefix'     => config('larasaas.route.api_prefix', 'api/larasaas'),
                 'middleware' => $middleware,
                 'as'         => config('larasaas.route.name_prefix', 'larasaas.') . 'api.',
-            ], function () {
+            ], function () use ($larasaas) {
                 $this->loadRoutesFrom(__DIR__ . '/../routes/api.php');
+
+                // Workspaces & teams — only for multi-tenant installs.
+                if ($larasaas->multiTenant()) {
+                    $this->loadRoutesFrom(__DIR__ . '/../routes/workspaces-api.php');
+                }
             });
             Route::group([
                 'domain' => config('larasaas.route.domain'),
@@ -147,6 +158,13 @@ class LaraSaaSServiceProvider extends ServiceProvider
                 => database_path('migrations/2026_10_14_000000_create_larasaas_schema.php'),
         ], 'larasaas-migrations');
 
+        // Optional multi-tenant workspace & team schema — also published by
+        // `larasaas:install` when the project is multi-tenant.
+        $this->publishes([
+            __DIR__ . '/../database/migrations/2026_10_14_000001_create_larasaas_workspaces_schema.php'
+                => database_path('migrations/2026_10_14_000001_create_larasaas_workspaces_schema.php'),
+        ], 'larasaas-workspaces');
+
         $this->publishes([
             __DIR__ . '/../resources/js' => resource_path('js/' . trim(config('larasaas.inertia.pages_dir', 'LaraSaaS'), '/')),
         ], 'larasaas-react');
@@ -191,7 +209,28 @@ class LaraSaaSServiceProvider extends ServiceProvider
         if ($this->app->runningInConsole()) {
             $this->commands([
                 InstallCommand::class,
+                \LaraSaaS\Console\DoctorCommand::class,
             ]);
+        }
+    }
+
+    /**
+     * One log warning per boot when config drifted from the database schema
+     * (e.g. `larasaas.user_model` was changed after migrating) — so the
+     * developer notices even without running `larasaas:doctor`.
+     */
+    protected function alertOnConfigDrift(): void
+    {
+        static $alerted = false;
+
+        if ($alerted || $this->app->runningUnitTests() || $this->app->runningInConsole()) {
+            return;
+        }
+
+        $alerted = true;
+
+        foreach (app(\LaraSaaS\Support\SetupDoctor::class)->issues() as $issue) {
+            \Illuminate\Support\Facades\Log::warning('LaraSaaS setup alert: ' . $issue);
         }
     }
 }

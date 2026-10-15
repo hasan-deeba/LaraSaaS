@@ -11,6 +11,12 @@ return [
     | password resets keep living in YOUR project — the kit simply resolves
     | the user (and optionally the workspace) models you point it to.
     |
+    | The migrations never touch a hardcoded `users` table: the billable
+    | customer columns (stripe_id, pm_type, pm_last_four, trial_ends_at) are
+    | created on whatever table this model (or the workspace model) uses.
+    | If you change this value AFTER migrating, run `php artisan larasaas:doctor`
+    | — it alerts you about the drift between config and database.
+    |
     */
 
     'user_model' => env('LARASAAS_USER_MODEL', 'App\\Models\\User'),
@@ -110,6 +116,50 @@ return [
 
     /*
     |--------------------------------------------------------------------------
+    | Multi-tenant Workspaces & Team Management
+    |--------------------------------------------------------------------------
+    |
+    | Flip `enabled` to choose whether THIS project is multi-tenant. When off
+    | (default) LaraSaaS behaves as a single-tenant product: no workspace
+    | routes, no team management, subscriptions belong to the user.
+    |
+    | When on, users can operate inside parallel workspaces (organizations,
+    | teams, companies…) and invite teammates with granular workspace-level
+    | roles — Owner, Admin, Member. The workspace schema is created by the
+    | published migration only for multi-tenant installs, and every model
+    | class below is swappable for your own (custom models should extend the
+    | shipped ones to inherit their relations).
+    |
+    */
+
+    'multi_tenant' => [
+        'enabled'              => (bool) env('LARASAAS_MULTI_TENANT', false),
+
+        'workspace_model'      => env('LARASAAS_WORKSPACE_MODEL', \LaraSaaS\Models\Workspace::class),
+        'membership_model'     => env('LARASAAS_MEMBERSHIP_MODEL', \LaraSaaS\Models\WorkspaceMember::class),
+        'invitation_model'     => env('LARASAAS_INVITATION_MODEL', \LaraSaaS\Models\WorkspaceInvitation::class),
+
+        // Granular roles, from most to least privileged. `implies` grants the
+        // lower roles automatically (an Admin is also a Member).
+        'roles' => [
+            'owner'  => ['label' => 'Owner',  'implies' => ['admin', 'member']],
+            'admin'  => ['label' => 'Admin',  'implies' => ['member']],
+            'member' => ['label' => 'Member', 'implies' => []],
+        ],
+
+        // Role given to users who accept an invitation without an explicit one.
+        'default_role'          => 'member',
+
+        // Pending invitations expire after this many days.
+        'invitation_expires_days' => 7,
+
+        // When true, an invitation can only be accepted by a user with the
+        // invited e-mail address.
+        'strict_invitation_email' => true,
+    ],
+
+    /*
+    |--------------------------------------------------------------------------
     | Billing — Laravel Cashier + Stripe
     |--------------------------------------------------------------------------
     |
@@ -117,6 +167,10 @@ return [
     | the User model; "workspace" resolves a team/workspace through the
     | resolver below, so each workspace gets its own subscription & portal.
     | The resolved model MUST use Laravel\Cashier\Billable (see README).
+    |
+    | `workspace_model` falls back to `multi_tenant.workspace_model` and the
+    | default resolver uses the user's current workspace from the team
+    | management tables when multi-tenant workspaces are enabled.
     |
     */
 

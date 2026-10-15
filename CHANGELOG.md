@@ -2,6 +2,22 @@
 
 All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
+## 4.0.0 — 2026-10-15
+
+### Breaking changes
+
+- The Cashier customer columns (`stripe_id`, `pm_type`, `pm_last_four`, `trial_ends_at`) are now created by the LaraSaaS schema migration **on the table of the configured model** (`larasaas.user_model`, or the workspace model for workspace billing) — never on a hardcoded `users` table. The installer retires Cashier's stock `create_customer_columns` migration (it hardcodes `users` and is not idempotent) after confirmation. Existing installations keep their columns; new installations no longer depend on the Cashier copy.
+- The package ships a second, optional migration (`2026_10_14_000001_create_larasaas_workspaces_schema.php`) for the multi-tenant workspace/team schema. It is published only for multi-tenant installs (`larasaas:install --multi-tenant` or the interactive question). The baseline filename/schema is unchanged for existing installs.
+
+### Added
+
+- **🏢 Multi-tenant Workspaces** — seamless workspace management allowing users to operate within parallel organizational structures. The `multi_tenant.enabled` / `LARASAAS_MULTI_TENANT` config switch makes the project multi-tenant (or keeps it single-tenant with zero workspace overhead): workspaces with unique slugs, per-user workspace lists and current-workspace resolution.
+- **👥 Team Management** — robust invitation system with granular workspace-level roles (Owner, Admin, Member): e-mail invitations with expiring tokens, accept/revoke flows, role changes with implications (`admin` implies `member`, configurable), and server-side safety rules (last-owner protection, Admins cannot touch Owners/Admins, owner-pointer reassignment). Manager/facade API (`createWorkspace`, `inviteMember`, `acceptInvitation`, `changeMemberRole`, `removeMember`, `hasWorkspaceRole`) plus JSON API and shipped Inertia pages (`/app/workspaces`, team management).
+- Workspace billing integration: with `billing.billable = workspace` and no custom resolver, the billable workspace is resolved from the team tables (most recently joined). Customer columns are created on the workspace model's table.
+- `php artisan larasaas:doctor` — setup drift detection with loud alerts: when the model in `larasaas.user_model` changes after migrating, it reports which table holds the billing columns and what to do (also surfaced at the end of `larasaas:install` and as a one-time boot log warning). Migrations stamp the model/table they built for in `larasaas_settings`.
+- `larasaas:install` asks whether the project is multi-tenant (`--multi-tenant` / `--no-multi-tenant`), writes `LARASAAS_MULTI_TENANT` to `.env`, and publishes the workspace schema only when needed.
+- Regression coverage for config-driven billable tables (custom user tables, workspace tables), model-change alerts, install idempotence/rollback, multi-tenant installs, the full invitation/role lifecycle, single-tenant route absence and workspace billing resolution.
+
 ## 3.0.0 — 2026-10-14
 
 ### Breaking changes
