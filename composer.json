@@ -1,9 +1,9 @@
 {
     "name": "hasan-deeba/larasaas",
-    "description": "Drop-in SaaS engine for Laravel + React: Stripe billing (Cashier), admin-managed plans and typed entitlements, scheduled announcements and Pennant feature flags — plugged into YOUR User model.",
+    "description": "Drop-in SaaS engine for Laravel + React: Stripe billing (Cashier), multi-tenant workspaces & team roles, admin-managed plans and typed entitlements, scheduled announcements and Pennant feature flags — plugged into YOUR User model.",
     "type": "library",
     "license": "MIT",
-    "keywords": ["laravel", "saas", "billing", "stripe", "cashier", "pennant", "react", "inertia", "announcements", "feature-flags", "starter-kit"],
+    "keywords": ["laravel", "saas", "billing", "stripe", "cashier", "pennant", "react", "inertia", "announcements", "feature-flags", "workspaces", "teams", "multi-tenant", "invitations", "starter-kit"],
     "require": {
         "php": "^8.2",
         "illuminate/support": "^10.0|^11.0|^12.0",

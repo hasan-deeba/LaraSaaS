@@ -54,7 +54,9 @@ jobs:
         run: |
           if ! vendor/bin/pest --colors=never > test-results.txt 2>&1; then
             cat test-results.txt
-            message="$(cat test-results.txt)"
+            # GitHub truncates each ::error annotation to ~4KB — emit the
+            # failure details (tail) first, then any remaining chunks.
+            message="$(tail -c 3600 test-results.txt)"
             message="${message//'%'/'%25'}"
             message="${message//$'\n'/'%0A'}"
             message="${message//$'\r'/'%0D'}"
