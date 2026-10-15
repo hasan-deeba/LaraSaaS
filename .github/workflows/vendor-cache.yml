@@ -1,6 +1,7 @@
-# TEMPORARY development helper — builds vendor/ on CI (sandbox has no Packagist
-# access) and exposes it via refs/scratch/vendor-cache or an artifact for local
-# test runs. This file is removed before release.
+# TEMPORARY development helper — builds vendor/ on CI (the sandbox has no
+# Packagist access) and delivers it as vendor-cache.tar.gz on the session
+# branch so the sandbox can run the PHP test suite locally. The tarball is
+# removed again before release; this file is removed before release too.
 name: Vendor cache
 
 on:
@@ -9,7 +10,6 @@ on:
 
 permissions:
   contents: write
-  actions: read
 
 jobs:
   cache:
@@ -30,28 +30,19 @@ jobs:
           composer require --dev --no-update "orchestra/testbench:^10.0" "pestphp/pest:^3.0"
           composer config allow-plugins.pestphp/pest-plugin true
           composer update --prefer-dist --no-interaction
-      - name: Push vendor to scratch ref
+      - name: Commit vendor tarball onto the session branch
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          if ! git add -f vendor composer.lock; then echo "::error::ADD FAILED"; exit 1; fi
-          if ! git commit -m "vendor cache for ${GITHUB_SHA}"; then echo "::error::COMMIT FAILED"; exit 1; fi
-          ok=0
-          for target in "HEAD:refs/scratch/vendor-cache" "HEAD:refs/heads/arena/vendor-cache"; do
-            if git push -f origin "$target" 2>push_err.txt; then
-              echo "::notice::PUSH OK to $target at $(git rev-parse HEAD)"
-              ok=1
-              break
-            fi
-            echo "::warning::push to $target failed: $(head -c 600 push_err.txt)"
-          done
-          if [ "$ok" != "1" ]; then echo "::error::ALL PUSH TARGETS FAILED"; fi
-      - name: Upload vendor artifact
-        if: always()
-        uses: actions/upload-artifact@v4
-        with:
-          name: vendor-tree
-          path: |
-            vendor/
-            composer.lock
-          compression-level: 9
+          tar czf vendor-cache.tar.gz vendor composer.lock
+          ls -la vendor-cache.tar.gz
+          git add -f vendor-cache.tar.gz
+          if ! git commit -m "chore: vendor cache payload for ${GITHUB_SHA}"; then
+            echo "::error::COMMIT FAILED"
+            exit 1
+          fi
+          if ! git push origin "HEAD:refs/heads/arena/ab737d4d-larasaas" 2>push_err.txt; then
+            echo "::error::PUSH FAILED: $(head -c 600 push_err.txt)"
+            exit 1
+          fi
+          echo "::notice::VENDOR CACHE PUSHED at $(git rev-parse HEAD)"
