@@ -1,0 +1,43 @@
+{
+    "name": "hasan-deeba/larasaas",
+    "description": "Drop-in SaaS engine for Laravel + React: Stripe billing (Cashier), multi-tenant workspaces & team roles, admin-managed plans and typed entitlements, scheduled announcements and Pennant feature flags — plugged into YOUR User model.",
+    "type": "library",
+    "license": "MIT",
+    "keywords": ["laravel", "saas", "billing", "stripe", "cashier", "pennant", "react", "inertia", "announcements", "feature-flags", "workspaces", "teams", "multi-tenant", "invitations", "starter-kit"],
+    "require": {
+        "php": "^8.2",
+        "illuminate/support": "^10.0|^11.0|^12.0",
+        "laravel/cashier": "^15.0|^16.0",
+        "laravel/pennant": "^1.8",
+        "inertiajs/inertia-laravel": "^1.3|^2.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^8.0|^9.0|^10.0",
+        "pestphp/pest": "^2.0|^3.0"
+    },
+    "autoload": {
+        "psr-4": {
+            "LaraSaaS\\": "src/"
+        }
+    },
+    "autoload-dev": {
+        "psr-4": {
+            "LaraSaaS\\Tests\\": "tests/"
+        }
+    },
+    "extra": {
+        "laravel": {
+            "providers": [
+                "LaraSaaS\\LaraSaaSServiceProvider"
+            ],
+            "aliases": {
+                "LaraSaaS": "LaraSaaS\\Facades\\LaraSaaS"
+            }
+        }
+    },
+    "config": {
+        "sort-packages": true
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}
