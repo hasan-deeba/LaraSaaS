@@ -1,7 +1,7 @@
 <p align="center">
   <h1 align="center">LaraSaaS</h1>
   <p align="center"><strong>The drop-in SaaS engine for Laravel + React.</strong></p>
-  <p align="center">Stripe billing · dynamic pricing · announcements · feature flags — plugged into <em>your</em> User model, your auth, your theme.</p>
+  <p align="center">Stripe billing · plans & limits · teams · announcements · feature flags — plugged into <em>your</em> app, your auth and your design.</p>
   <p align="center">
     <a href="https://packagist.org/packages/hasan-deeba/larasaas"><img src="https://img.shields.io/packagist/v/hasan-deeba/larasaas.svg?style=flat-square" alt="Latest Version on Packagist"></a>
     <a href="https://packagist.org/packages/hasan-deeba/larasaas"><img src="https://img.shields.io/packagist/dt/hasan-deeba/larasaas.svg?style=flat-square" alt="Total Downloads"></a>
@@ -12,627 +12,208 @@
 
 ---
 
-LaraSaaS is a **composer package** (not a fork-the-repo starter kit). It adds everything a SaaS needs to an **existing** Laravel application without touching your authentication, your models or your design system:
+LaraSaaS is a **Composer package** that adds everything a SaaS needs to an **existing** Laravel app. It never touches your login, your models or your design.
 
-- **Your auth stays yours** — login/registration live in your project. LaraSaaS resolves the user model from `config('larasaas.user_model')` (`App\Models\User` by default) and never ships its own.
-- **🏢 Multi-tenant Workspaces** — seamless workspace management allowing users to operate within parallel organizational structures. Flip one config flag (`multi_tenant.enabled` / `LARASAAS_MULTI_TENANT`) to make your project multi-tenant — or keep it single-tenant with zero workspace overhead.
-- **👥 Team Management** — robust invitation system with granular workspace-level roles (Owner, Admin, Member): invite by e-mail, accept via token, promote/demote, revoke, and safe-guards like last-owner protection.
-- **Stripe Billing via Laravel Cashier** — subscription provisioning through Stripe Checkout, plan swaps with proration, cancel/resume, invoices, and the secure customer portal. Bill the **user** or a **workspace**.
-- **Admin-managed plans** — create, edit and archive plans from your own dashboard using `LaraSaaS::createPlan()`, `updatePlan()` and `archivePlan()` (or use the optional shipped Inertia admin pages). Prices and typed feature values live in the database; developers define the feature catalog in config. The React and embed pricing tables follow automatically.
-- **Announcements system** — global broadcasts with colored typings, scheduling windows, audience targeting, CTAs and per-user dismissible persistence.
-- **Feature flags via Laravel Pennant** — database-driven toggles with percentage rollouts, workspace targeting and e-mail targeting, all declared in config.
-- **Theme & i18n native** — components read your CSS variables, follow your `.dark` class automatically, ship EN/FR/AR translations and are fully RTL-aware.
-- **Three integration modes** — Laravel + React in one project, a headless JSON API for separate SPAs/Flutter apps, or embeddable pages via `<iframe>`/WebView. Pick yours in config; switch any time. See [Which integration is right for you?](#which-integration-is-right-for-you)
+## Contents
 
-## Requirements
-
-- **PHP 8.2+** (8.2–8.5), with the **`bcmath`** extension enabled — it is required by Laravel Cashier's `moneyphp/money` dependency. Verify with `php -m | grep bcmath`; on Debian/Ubuntu install it with `sudo apt install php-bcmath` (see [Troubleshooting](#troubleshooting) if composer complains about it).
-- **Laravel 10, 11 or 12** — Composer picks the matching Cashier automatically (`laravel/cashier` 15.x for Laravel 10/11, 16.x for Laravel 12).
-- An existing auth setup — any Laravel auth works. A **React/Inertia** frontend (e.g. `laravel new app --breeze --react`) is only required for the `inertia` mode; the `api` and `embed` modes have no frontend build requirements at all.
-- A **Stripe** account (test keys are fine)
-
-## Which integration is right for you?
-
-LaraSaaS adapts to how your product is built — you don't rebuild anything to use it. Pick the situation that matches yours:
-
-| # | Your setup | Mode | What you do |
-|---|-----------|------|-------------|
-| **1** | **Laravel + React in the same project** (Inertia — e.g. Breeze with React) | `inertia` (default) | Install → publish → use the shipped pages/components **directly**. Nothing else to build. |
-| **2** | **React on another server** (SPA talking to your Laravel API) **or Flutter / iOS / Android** | `api` | Use **only the JSON API** and design **your own tables & pricing UI** on the client. |
-| **3** | Same as 2, but you'd rather **not** rebuild the UI | `embed` | Drop the package's standalone pricing/billing pages in with an **`<iframe>`** (or a mobile **WebView**). |
-
-Choose the mode in `.env`:
-
-```env
-LARASAAS_INTEGRATION_MODE=inertia   # inertia | api | embed | all | custom
-```
-
-or in `config/larasaas.php` under `integration.mode`. **You can change it at any time** — it only decides which routes the package registers, so switching is safe and reversible. `all` enables every surface at once (handy while migrating); `custom` registers nothing but the Stripe webhook so you can wire your own routes — see [Switching modes & custom integration](#switching-modes--custom-integration).
-
-The mode is also asked interactively by `php artisan larasaas:install` (or passed with `--mode=`), and written to your `.env` automatically.
+- [Why LaraSaaS](#why-larasaas)
+- [Requirements](#requirements)
+- [Quick start](#quick-start)
+- [Choose how your frontend connects](#choose-how-your-frontend-connects)
+- [Plans & limits](#plans--limits)
+- [Subscriptions](#subscriptions)
+- [Multi-tenant workspaces & teams](#multi-tenant-workspaces--teams)
+- [Announcements](#announcements)
+- [Feature flags](#feature-flags)
+- [Admin panels](#admin-panels)
+- [Theming & translations](#theming--translations)
+- [Configuration reference](#configuration-reference)
+- [Artisan commands](#artisan-commands)
+- [Troubleshooting](#troubleshooting)
+- [Versioning](#versioning)
+- [Contributing](#contributing)
 
 ---
 
-### Mode 1 — Laravel + React in the same project → `inertia`
+## Why LaraSaaS
 
-This is the classic setup (e.g. `laravel new app --breeze --react`): one codebase, one deploy. Install the package, publish the React pages/components and use them directly — `/app/pricing`, `/app/billing`, the `<AnnouncementStack />`, `<FeatureGate />`, `<PricingTable />` and the admin panels all work out of the box.
+| | |
+|---|---|
+| 🔐 **Your auth stays yours** | No login screens shipped. Works with Breeze, Jetstream, Fortify, Sanctum, Passport or your own. |
+| 💳 **Stripe billing** | Checkout, plan swaps with proration, cancel/resume, invoices, customer portal and webhooks, all through Laravel Cashier. |
+| 📦 **Plans & limits** | Create plans from a dashboard. Define features like `storage_gb` or `uploads` once and check them on the server with one line. |
+| 🏢 **Multi-tenant (optional)** | Workspaces, Owner/Admin/Member roles and e-mail invitations. Bill each user or each company. |
+| 📣 **Announcements** | Scheduled, colored, dismissible banners managed from an admin panel. |
+| 🚩 **Feature flags** | Percentage rollouts and targeting by workspace or e-mail, built on Laravel Pennant. |
+| 🔌 **Any frontend** | Laravel + React (Inertia), a JSON API for SPAs and Flutter/mobile, or embeddable `<iframe>` pages. |
+| 🎨 **Fits your design** | Light/dark aware, uses your CSS variables, zero npm dependencies, EN/FR/AR translations, RTL ready. |
+| ⚙️ **Everything configurable** | URLs, middleware, models, roles, guards: every setting is in one config file. |
 
-Follow the standard [Installation](#installation) below — there is nothing extra to configure.
+---
 
-### Mode 2 — Headless APIs (separate React SPA, Flutter, native) → `api`
+## Requirements
 
-When your frontend lives on another server — or is a **Flutter / native** app — you usually want **APIs only**, and you design your own tables & pricing screens in your own design system. Set `LARASAAS_INTEGRATION_MODE=api` and LaraSaaS serves exactly that: a JSON API (plus the Stripe webhook). No LaraSaaS views, no React publishing.
+- **PHP 8.2+** with the **`bcmath`** extension (`php -m | grep bcmath`)
+- **Laravel 10, 11 or 12** (Composer picks Cashier 15 or 16 for you)
+- Any **existing auth** setup
+- A **Stripe** account (test keys are fine)
+- **React + Inertia** only if you use the `inertia` mode (e.g. `laravel new app --breeze --react`)
 
-Every active plan in the database is returned as data, so your pricing table is 100% yours — the API gives you the complete matrix to render.
+---
 
-#### Endpoints
+## Quick start
 
-All endpoints live under `/api/larasaas` (configurable via `route.api_prefix`):
+From zero to a working pricing page.
 
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `GET` | `/pricing` | **Public**, optionally authenticated. The full pricing matrix (plans, prices, intervals, currencies, trial days, contact-sales…) — everything your own pricing table needs |
-| `GET` | `/subscription` | Current subscription state (`subscribed`, `on_trial`, `on_grace_period`, `ends_at`, `plan`, …) |
-| `GET` | `/invoices` | Recent invoices (id, date, total, status, PDF URL) |
-| `POST` | `/billing/subscribe/{plan}` | Start checkout → returns the Stripe Checkout `url` to open (or reports a `swap` if already subscribed). Body: `interval`, optional `success_url` / `cancel_url` |
-| `POST` | `/billing/swap/{plan}` | Switch plan/interval (prorated). Body: `interval` |
-| `POST` | `/billing/cancel` | Cancel at period end |
-| `POST` | `/billing/resume` | Resume a canceled subscription |
-| `POST` | `/billing/portal` | Returns the Stripe customer-portal `url` to open. Body: optional `success_url` |
-| `GET` | `/announcements` · `/features` | The announcement & feature-flag JSON your app can consume anywhere |
-
-#### Examples
-
-```bash
-# The plan matrix for your own pricing table
-curl -s https://api.yourapp.test/api/larasaas/pricing
-```
-
-```ts
-// React SPA on another server
-const { data: pricing } = await fetch('https://api.yourapp.test/api/larasaas/pricing', {
-    headers: { Authorization: `Bearer ${token}` },
-}).then(r => r.json());
-
-// …render your own table from pricing.plans, then:
-const checkout = await fetch('https://api.yourapp.test/api/larasaas/billing/subscribe/growth', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
-    body: JSON.stringify({ interval: 'monthly' }),
-}).then(r => r.json());
-
-window.location.href = checkout.url; // send the user to Stripe Checkout
-```
-
-```dart
-// Flutter
-final res = await http.get(
-  Uri.parse('https://api.yourapp.test/api/larasaas/pricing'),
-  headers: {'Authorization': 'Bearer $token'},
-);
-final plans = jsonDecode(res.body)['data']['plans']; // build your own pricing widgets
-```
-
-#### Auth & CORS
-
-- All API endpoints **except `GET /pricing` and CORS preflight** require authentication by default. `route.api_middleware` decides how protected API requests authenticate. For cross-server clients, point it at token auth, e.g. `'api_middleware' => ['api', 'auth:sanctum']`, and issue tokens (Sanctum, Passport, …) from your own login endpoint. Same-origin clients can keep the default `['web', 'auth']` session auth.
-- Public pricing uses `route.public_api_middleware` (default `['web']` for optional session authentication). For token clients use `['api']` and set `route.pricing_guard` to `'sanctum'` (or your guard). Do **not** add `auth:sanctum` to the public stack. Missing/invalid credentials are treated as guests; no identity is accepted from a user ID in the API query/body.
-- Pricing returns `{ "data": { ...pricing }, "authenticated": false, "subscription": { "subscribed": false } }`. Valid optional credentials include the caller's subscription state; invoices still require a separate authenticated request. Avoid shared/CDN caching of personalized pricing responses.
-- Browser SPAs on a different origin need CORS: set `integration.api.cors_origins` (env `LARASAAS_API_CORS_ORIGINS=https://app.example.com`). Flutter/native clients don't need CORS at all. If the host's global Laravel CORS middleware handles `api/*`, configure its allowed origins/credentials consistently or exclude the package path from it; global preflight handling runs before LaraSaaS middleware.
-
-### Mode 3 — Embed the UI with `<iframe>` / WebView → `embed`
-
-If you don't want to rebuild the pricing/billing UI for your separate React SPA or Flutter app, let the **package** serve it and embed it — like a Stripe pricing table. Set `LARASAAS_INTEGRATION_MODE=embed` and LaraSaaS registers standalone pages (`/embed/pricing`, `/embed/billing`) that are **server-rendered, self-contained and need no Node/Vite build** on the Laravel side.
-
-#### Public pricing and signed billing
-
-Guests can embed `/embed/pricing` directly, or use `LaraSaaS::embedUrl()` / `LaraSaaS::embedUrl(null, 'pricing')`. No signature or user is needed. They see plans and a sign-in link, not invoices, billing navigation or checkout forms. Set `login_url` in config to your host's login/registration URL.
-
-First-party session users are recognized automatically on GET pages. For cross-server authenticated visitors, generate a signed URL **on your trusted server for the currently authenticated user**, never from a user ID supplied by the client. Billing pages are private, and every embed POST requires a signed user URL (including session users), since the embed surface intentionally omits CSRF middleware. Invalid, expired or tampered identity signatures return 403; they never downgrade to guest access.
-
-```php
-use LaraSaaS\Facades\LaraSaaS;
-
-$src = LaraSaaS::embedUrl(); // Public pricing: no auth()->user(), no signature
-// Equivalent: LaraSaaS::embedUrl(null, 'pricing')
-```
-
-```blade
-<iframe src="{{ $src }}" width="100%" height="720" style="border:0"></iframe>
-```
-
-**Embeds are customer-facing only.** Never embed admin forms. Keep your dashboard native and call the package's [plan management functions](#your-own-dashboard-no-admin-embed) from your authorized backend. This works in `embed` and `api` mode without enabling the shipped Inertia admin UI.
-
-#### Signed embed URLs — no shared sessions
-
-Cross-server embedding can't rely on cookies. Generate a **signed, expiring URL** per user on your Laravel side and point the frame at it:
-
-```php
-use LaraSaaS\Facades\LaraSaaS;
-
-// In a host route protected by auth middleware:
-$src = LaraSaaS::embedUrl($request->user(), 'billing');
-// → https://your-app.test/embed/billing?user=42&expires=…&signature=…
-// Optional: use 'pricing' here to show this signed-in user's subscription.
-```
-
-The signature is HMAC'd with your app key and expires (default 60 minutes, tune `integration.embed.token_ttl`), so the parent app never leaks its session to the frame and links can't be forged or tampered with.
-
-```html
-<!-- Your React SPA (any server) -->
-<iframe src="{{ $src }}" width="100%" height="720" style="border:0"></iframe>
-```
-
-```dart
-// Flutter
-WebView(initialUrl: embedUrl); // embedUrl from your API
-```
-
-Checkout and the Stripe customer portal automatically open in the **top-level window** (never trapped inside the frame) — forms post with `target="_top"`.
-
-#### Controlling who may frame the pages
-
-```php
-// config/larasaas.php
-'integration' => [
-    'embed' => [
-        'frame_ancestors' => ['https://app.example.com'], // CSP frame-ancestors; ['*'] = any parent
-        'token_ttl'       => 60,                          // minutes
-    ],
-],
-```
-
-The package sends `Content-Security-Policy: frame-ancestors …` on the embed pages. Make sure your hosting/CDN doesn't inject `X-Frame-Options: DENY` on top of it. (Also available as env `LARASAAS_EMBED_FRAME_ANCESTORS`.)
-
-### Switching modes & custom integration
-
-- **`all`** — registers the Inertia, API and embed surfaces at once. Great while you migrate from one architecture to another, or when some screens are embedded and others are native.
-- **`custom`** — registers *only* the Stripe webhook. Build whatever you want on top of the `LaraSaaS` manager / facade — your routes, your views, your mobile client:
-
-```php
-use LaraSaaS\Facades\LaraSaaS;
-
-Route::get('/my-pricing', function () {
-    return MyCoolPricingTable::make(LaraSaaS::pricingForUi());
-});
-
-LaraSaaS::billable($request)?->newSubscription('default', $priceId)->checkout([/* … */]);
-LaraSaaS::subscriptionForUi($request);   // status for your UI
-LaraSaaS::createPlan($validatedPlanData); // after your host authorizes the admin
-// embedUrl() requires embed/all mode (or explicitly registered embed routes).
-```
-
-The manager works regardless of mode — the mode only controls which ready-made surfaces are registered. Change `LARASAAS_INTEGRATION_MODE` (or `integration.mode`) whenever you want; nothing is baked in at install time.
-
-## Installation
+### 1. Install the package
 
 ```bash
 composer require hasan-deeba/larasaas:^1.0
-php artisan larasaas:install            # asks which integration mode + whether the project is multi-tenant
-# php artisan larasaas:install --mode=api --no-multi-tenant    # or pick it up front:
-# php artisan larasaas:install --mode=embed --multi-tenant
-# php artisan larasaas:install --mode=inertia
 ```
 
-LaraSaaS follows semantic versioning: pin the **major** version in your project (`^1.0` for the 1.x line) instead of `*`, so `composer update` only ever brings you non-breaking minor/patch releases. If you deliberately want the newest `main` build, install with `hasan-deeba/larasaas:@dev`.
+### 2. Run the installer
 
-The install command asks for your [integration mode](#which-integration-is-right-for-you) and whether the project is **multi-tenant**, writes `LARASAAS_INTEGRATION_MODE` and `LARASAAS_MULTI_TENANT` to `.env`, then publishes the config, **the consolidated LaraSaaS schema migration** (plus the workspace/team migration for multi-tenant installs), and translations (plus the React components in `inertia`/`all` mode), publishes Cashier's own migrations separately, and (optionally) runs the migrations. The LaraSaaS migration creates plans, announcements, dismissals, setup stamps and the Cashier **customer columns on the table of your configured model** (`larasaas.user_model` — or the workspace model for workspace billing — never a hardcoded `users` table); it inserts **no sample plans**. Pennant owns its feature-flag storage: it is not folded into LaraSaaS's migration. Migrations are published, not auto-loaded from vendor. Re-running the installer does not overwrite LaraSaaS migrations, even with `--force`. The repository contains `database/migrations/2026_10_14_000000_create_larasaas_schema.php` (single-tenant baseline) and `database/migrations/2026_10_14_000001_create_larasaas_workspaces_schema.php` (published only for multi-tenant installs), with every LaraSaaS table and column defined directly. There are no legacy/add-column/upgrade migrations.
+```bash
+php artisan larasaas:install
+```
 
-Because the schema is tied to the model in config, **`php artisan larasaas:doctor` alerts you whenever that model changes after migrating** (a one-time log warning is also written on boot): it compares the model/table the migrations were run for against the current config and tells you exactly which table holds the billing columns.
+It asks two questions and writes the answers to `.env`:
 
-### Cashier setup
+- **Integration mode:** how your frontend talks to LaraSaaS. Not sure? Keep `inertia`. See [Choose how your frontend connects](#choose-how-your-frontend-connects).
+- **Multi-tenant?** Should users belong to workspaces/companies? Not sure? Answer **no**; you can enable it later.
 
-**Required in every integration mode:** add Cashier's `Billable` trait to the
-model that owns subscriptions. Installing Cashier or publishing its migrations
-does **not** add this trait to your application's models automatically.
-For the default user billing:
+It then publishes the config, migrations and translations, plus the React pages in `inertia` mode.
+
+> Skip the questions: `php artisan larasaas:install --mode=inertia --no-multi-tenant`
+
+### 3. Add the `Billable` trait to your User model
 
 ```php
-namespace App\Models;
-
-use Illuminate\Foundation\Auth\User as Authenticatable;
+// app/Models/User.php
 use Laravel\Cashier\Billable;
 
 class User extends Authenticatable
 {
-    use Billable; // Keep your existing traits and model configuration too.
+    use Billable;
 }
 ```
 
-If `billing.billable` is `workspace`, add the trait to your **workspace model**
-instead and configure `billing.workspace_model` and `billing.workspace_resolver`.
-The resolved model must use `Billable` (inherited/nested usage is supported).
-For a custom user model or workspace billing, also register the same model with
-Cashier in your application's `AppServiceProvider::boot()` so webhooks resolve
-the correct customers:
-
-```php
-\Laravel\Cashier\Cashier::useCustomerModel(\App\Models\Workspace::class);
-// For custom user billing, use your configured user model class instead.
-```
-
-Make sure Cashier's customer columns (`stripe_id`, `pm_type`, `pm_last_four`,
-`trial_ends_at`) exist on the billable model's table. **LaraSaaS's schema
-migration adds them to whatever table the configured model uses** — the
-configured `larasaas.user_model` for user billing, the configured workspace
-model for workspace billing — and it is idempotent, so it coexists with
-Cashier's published migrations. Cashier's stock customer-columns migration
-hardcodes `users`; when your billable table is not `users`, the installer
-warns you and offers to remove that file (LaraSaaS manages those columns).
-`php artisan larasaas:doctor` reports any missing columns or config drift.
-
-Without the trait, calls such as `subscription()` and `subscribed()` cannot
-work. LaraSaaS now reports a setup error identifying the model rather than an
-undefined-method error. The installer reminds you of this step but never edits
-your model files.
-
-### Stripe credentials
-
-Add your Stripe credentials to `.env`:
+### 4. Add your Stripe keys to `.env`
 
 ```env
 STRIPE_KEY=pk_test_...
 STRIPE_SECRET=sk_test_...
 STRIPE_WEBHOOK_SECRET=whsec_...
-
 ```
 
-Two one-time touches in your React entry (`resources/js/app.tsx`) — **only for `inertia` / `all` mode** (the `api` and `embed` modes don't publish React components at all):
+### 5. Run the migrations
+
+```bash
+php artisan migrate
+```
+
+### 6. Connect the Stripe webhook
+
+The webhook keeps subscriptions in sync with Stripe. No CSRF exclusion is needed.
+
+```bash
+# Production: create the webhook in Stripe with all required events
+php artisan cashier:webhook --url="https://yourapp.com/larasaas/webhooks/stripe"
+
+# Local development: forward events with the Stripe CLI
+stripe listen --forward-to http://localhost:8000/larasaas/webhooks/stripe
+```
+
+Copy the `whsec_...` secret it shows into `STRIPE_WEBHOOK_SECRET`.
+
+### 7. Make yourself an admin
+
+```env
+LARASAAS_ADMIN_EMAILS=you@yourapp.com
+```
+
+### 8. Create your first plan
+
+1. In Stripe: **Product catalog → Add product** and add a recurring monthly price. Copy its `price_...` ID.
+2. In LaraSaaS: open **`/app/admin/plans`** (inertia mode), or run:
+
+```bash
+php artisan tinker
+```
+
+```php
+LaraSaaS\Facades\LaraSaaS::createPlan([
+    'key'     => 'starter',
+    'name'    => 'Starter',
+    'monthly' => ['price' => 9, 'stripe_id' => 'price_your_monthly_id'],
+]);
+```
+
+### 9. Connect your frontend (inertia mode only)
+
+Let Inertia find the LaraSaaS pages in `resources/js/app.tsx`:
 
 ```tsx
-// 1. Let Inertia resolve the published pages
-resolve: (name) =>
-    resolvePageComponent(
-        `./${name}.tsx`,
-        import.meta.glob(['./**/*.tsx'], { eager: true }),
-        // LaraSaaS pages were published to resources/js/LaraSaaS — nothing else to do
-    ),
+resolve: (name) => {
+    const pages = import.meta.glob(['./Pages/**/*.tsx', './LaraSaaS/Pages/**/*.tsx']);
+
+    return resolvePageComponent(
+        name.startsWith('LaraSaaS/')
+            ? `./LaraSaaS/Pages/${name.slice('LaraSaaS/'.length)}.tsx`
+            : `./Pages/${name}.tsx`,
+        pages,
+    );
+},
 ```
 
+> Laravel 12 starter kits use a lowercase `pages` folder. Change `./Pages/` to `./pages/` for your own pages.
+
+Then add the styles in `resources/css/app.css`:
+
 ```css
-/* 2. resources/css/app.css — after your tailwind import */
 @import '../js/LaraSaaS/larasaas.css';
 ```
 
-Create plans using `LaraSaaS::createPlan()` from your dashboard (or the optional `/app/admin/plans` UI) first (see below), then visit `/app/pricing` (or `/embed/pricing`, or hit `/api/larasaas/pricing` — depending on your mode) — you're a SaaS. The URL prefix, middleware, route names and even the domain are configurable under the `route` key.
+### 10. Open it 🎉
 
-### Stripe webhook
+| Mode | URL |
+|---|---|
+| `inertia` | `/app/pricing`, `/app/billing`, `/app/dashboard` |
+| `api` | `GET /api/larasaas/pricing` |
+| `embed` | `/embed/pricing` |
 
-1. Add a webhook in the Stripe dashboard pointing to `https://your-app.test/larasaas/webhooks/stripe` (events: `customer.subscription.*`, `invoice.payment_succeeded`).
-2. Exclude the path from CSRF verification:
+Something not working? Run `php artisan larasaas:doctor`.
 
-```php
-// Laravel 11/12 — bootstrap/app.php
-->withMiddleware(fn ($middleware) => $middleware->validateCsrfTokens(except: [
-    'larasaas/webhooks/stripe',
-]));
-```
+---
 
-3. Listen to `LaraSaaS\Events\SubscriptionChanged` to react on lifecycle events (seat limits, e-mails, cache warm-up, …).
+## Choose how your frontend connects
 
-### Troubleshooting
-
-**`ext-bcmath` missing**
-
-> `moneyphp/money … require ext-bcmath * -> it is missing from your system. Install or enable PHP's bcmath extension.`
-
-Cashier (via its `moneyphp/money` dependency) needs the `bcmath` PHP extension. Enable it for the exact PHP version Composer runs on, then re-run `composer require` / `composer update`:
-
-- **Debian/Ubuntu:** `sudo apt install php-bcmath` (or `php8.x-bcmath` for a pinned version)
-- **RHEL/Fedora/Rocky:** `sudo dnf install php-bcmath`
-- **macOS (Homebrew):** included with the `php` formula
-
-Verify with `php -m | grep bcmath` — and make sure CLI and your web server use the **same** PHP version/extensions. Don't work around it with `--ignore-platform-req=ext-bcmath`: billing math will fatal at runtime.
-
-**PHP 8.5 and `moneyphp/money` version conflicts**
-
-Money v4.8+ supports PHP 8.5. If composer lists "your php version (8.5.x) does not satisfy that requirement" only for old money 4.x releases, the real blocker is usually the missing `bcmath` extension above — enable it first. If a dependency genuinely caps at PHP ≤ 8.4, run the app on PHP 8.2–8.4.
-
-**Cashier/Laravel mismatch**
-
-`laravel/cashier` 15.x requires Laravel 10/11 and 16.x requires Laravel 12. LaraSaaS accepts both, so Composer resolves the right one for your app — if you see an `illuminate/console` conflict, you simply have a Laravel 10/11 app (Cashier 15.x will be picked), nothing to fix.
-
-**Composer only resolves `dev-main`**
-
-Stable versions are published as git tags (e.g. `v1.0.0`). If no version matching your constraint exists yet, check the [releases page](https://github.com/hasan-deeba/LaraSaaS/releases) — or install the dev build with `@dev` until the next tag is pushed.
-
-## Configuration highlights
-
-Integration settings and developer feature definitions live in `config/larasaas.php`; plan records live in the database:
-
-```php
-// How your frontend consumes LaraSaaS — switch any time
-// (inertia = Laravel+React same project | api = headless SPA/Flutter |
-//  embed = iframe/WebView pages | all | custom = your own routes)
-'integration' => [
-    'mode' => env('LARASAAS_INTEGRATION_MODE', 'inertia'),
-    'api'   => ['cors_origins' => []],                   // e.g. ['https://app.example.com']
-    'embed' => ['frame_ancestors' => ['*'], 'token_ttl' => 60],
-],
-
-// Which model represents your users (login/register stay in YOUR app).
-// Migrations follow this model: the Cashier customer columns are created on
-// ITS table (never a hardcoded `users` table). Change it later? Run
-// `php artisan larasaas:doctor` - it alerts you about any config/schema drift.
-'user_model' => App\\Models\\User::class,
-// 'user_model' => App\\Models\\Member::class, // anything Eloquent
-
-// Is this project multi-tenant? Workspaces (parallel organizations) and the
-// team management surface (invitations, Owner/Admin/Member roles) only exist
-// when enabled. See "Multi-tenant workspaces & team management".
-'multi_tenant' => [
-    'enabled' => (bool) env('LARASAAS_MULTI_TENANT', false),
-    'workspace_model'  => \\LaraSaaS\\Models\\Workspace::class,
-    'membership_model' => \\LaraSaaS\\Models\\WorkspaceMember::class,
-    'invitation_model' => \\LaraSaaS\\Models\\WorkspaceInvitation::class,
-    'roles' => [
-        'owner'  => ['label' => 'Owner',  'implies' => ['admin', 'member']],
-        'admin'  => ['label' => 'Admin',  'implies' => ['member']],
-        'member' => ['label' => 'Member', 'implies' => []],
-    ],
-    'default_role'            => 'member',
-    'invitation_expires_days' => 7,
-    'strict_invitation_email' => true,
-],
-
-// Bill the user or a workspace per-subscription
-'billing' => [
-    'billable' => 'workspace',
-    'workspace_model' => App\Models\Workspace::class,
-    'workspace_resolver' => fn ($user) => $user->currentWorkspace(),
-],
-
-// Developers define capabilities and types; admins assign values to plans.
-'plan_features' => [
-    'uploads' => ['label' => 'File uploads', 'type' => 'boolean', 'default' => false],
-    'storage_gb' => [
-        'label' => 'Storage', 'type' => 'integer', 'unit' => 'GB',
-        'default' => 0, 'allow_unlimited' => true,
-    ],
-],
-
-// Display settings only — no plans or Stripe price IDs in config.
-'pricing' => [
-    'default_currency' => 'usd',
-    'currencies' => ['usd' => '$', 'eur' => '€', 'sar' => 'ر.س'],
-    'intervals' => ['monthly', 'yearly'],
-    'default_interval' => 'monthly',
-],
-
-// Announcement typings → colors + icons consumed by the React stack
-'announcements' => ['types' => ['info' => ['color' => '#3b82f6'], /* … */]],
-
-// Pennant flags, resolved from config
-'features' => [
-    'ai-assistant'  => ['enabled' => false],
-    'new-dashboard' => ['percentage' => 50],
-    'beta-reports'  => ['workspaces' => [1, 4, 9]],
-    'concierge'     => ['emails' => ['vip@yourapp.test']],
-    'labs'          => ['resolve' => fn ($scope) => $scope?->isFounder()],
-],
-```
-
-## Multi-tenant workspaces & team management
-
-LaraSaaS can run your product as **multi-tenant** — users operate within parallel workspaces (organizations, teams, companies), each with its own team, granular roles and (optionally) its own subscription. The choice lives in config, so the same package powers single-tenant and multi-tenant products:
-
-```php
-'multi_tenant' => [
-    'enabled' => (bool) env('LARASAAS_MULTI_TENANT', false), // ← your choice
-    'workspace_model'  => \LaraSaaS\Models\Workspace::class,
-    'membership_model' => \LaraSaaS\Models\WorkspaceMember::class,
-    'invitation_model' => \LaraSaaS\Models\WorkspaceInvitation::class,
-    'roles' => [
-        'owner'  => ['label' => 'Owner',  'implies' => ['admin', 'member']],
-        'admin'  => ['label' => 'Admin',  'implies' => ['member']],
-        'member' => ['label' => 'Member', 'implies' => []],
-    ],
-    'default_role'            => 'member',
-    'invitation_expires_days' => 7,
-    'strict_invitation_email' => true,
-],
-```
-
-`php artisan larasaas:install` asks the question up front (or take `--multi-tenant` / `--no-multi-tenant`) and writes `LARASAAS_MULTI_TENANT` to `.env`. With the flag **off**, no workspace routes, tables or features exist — the package behaves as a pure single-tenant product. With the flag **on**, the workspace schema is migrated and the whole surface appears.
-
-### Workspaces
-
-Users can belong to many workspaces; each workspace has a name, a unique slug and an owner. Everything is driven by the manager/facade (works in every integration mode) or by the ready-made HTTP surface:
-
-```php
-$workspace = LaraSaaS::createWorkspace($user, ['name' => 'Acme Inc']);  // creator becomes Owner
-LaraSaaS::workspacesFor($user);       // every workspace the user belongs to
-LaraSaaS::currentWorkspaceFor($user); // the most recently joined one
-```
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `GET` | `/api/larasaas/workspaces` | The user's workspaces (with their role in each) |
-| `POST` | `/api/larasaas/workspaces` | Create a workspace (`name`, optional `slug`) — creator becomes Owner |
-| `GET` | `/api/larasaas/workspaces/{id}` | Workspace detail with members (and invitations for managers) |
-| `GET` | `/api/larasaas/workspaces/{id}/members` | Members and their roles |
-
-In `inertia`/`all` mode the same data is served by the shipped `/app/workspaces` and `/app/workspaces/{id}` React pages.
-
-### Team management — invitations & granular roles
-
-Roles are **workspace-level** and granular: **Owner**, **Admin**, **Member**. Owners manage everything (roles included), Admins manage members and invitations, Members participate. Role implications are configurable (`admin` implies `member`, …), and safety rules are enforced server-side: the last Owner can never be demoted or removed, Admins cannot touch Owners or other Admins, and ownership follows a surviving Owner when the primary one leaves.
-
-The invitation system is e-mail based: Owners/Admins invite an address with a role, invitees accept through a unique expiring token (e-mail matching enforced by default), and pending invitations can be revoked at any time.
-
-```php
-$invitation = LaraSaaS::inviteMember($workspace, $actor, 'teammate@company.com', 'admin');
-LaraSaaS::acceptInvitation($invitation->token, $user);      // or pass the model
-LaraSaaS::changeMemberRole($workspace, $actor, $user, 'admin'); // Owners only
-LaraSaaS::removeMember($workspace, $actor, $user);
-LaraSaaS::hasWorkspaceRole($workspace, $user, 'admin');     // honours role implications
-```
-
-| Method | Endpoint | Purpose |
-|--------|----------|---------|
-| `POST` | `/api/larasaas/workspaces/{id}/invitations` | Invite an e-mail (`email`, `role`) |
-| `GET` | `/api/larasaas/workspaces/{id}/invitations` | List invitations (Owners/Admins) |
-| `DELETE` | `/api/larasaas/workspaces/{id}/invitations/{invitation}` | Revoke a pending invitation |
-| `GET` | `/api/larasaas/invitations/{token}` | Preview an invitation |
-| `POST` | `/api/larasaas/invitations/{token}/accept` | Accept and join the workspace |
-| `PUT` | `/api/larasaas/workspaces/{id}/members/{user}/role` | Change a member's role (Owners) |
-| `DELETE` | `/api/larasaas/workspaces/{id}/members/{user}` | Remove a member |
-
-### Workspace billing
-
-Combine multi-tenancy with `billing.billable = workspace` to give **each workspace its own subscription**. With no custom `workspace_resolver`, LaraSaaS resolves the billable workspace from the team tables (the user's most recently joined workspace); override with `billing.workspace_resolver` or a `currentWorkspace()` method on your user model when you need something else. The workspace model then needs Cashier's `Billable` trait (extend the shipped `LaraSaaS\Models\Workspace` or swap `multi_tenant.workspace_model`), and the customer columns are created on **its** table — again never a hardcoded `users` table.
-
-## Admin-managed plans and developer-defined features
-
-### Responsibilities
-
-- **Developer:** implement the capability and declare its stable key/type in `plan_features`. Config is version-controlled, supports `config:cache`, and prevents dashboard users from inventing executable capabilities. An application enum may hold the same keys if you want compile-time references in your own code; no database enum migration is needed when adding a feature.
-- **Admin:** manage plans through the host application’s protected dashboard. The developer calls `LaraSaaS::createPlan()`, `updatePlan()` and `archivePlan()`; no iframe or Inertia dependency is needed. The optional `/app/admin/plans` UI in `inertia`/`all` mode uses the same validated functions and requires the `larasaas-admin` Gate (see [Who can open the admin panels](#who-can-open-the-admin-panels)).
-- **Application:** enforce entitlements on the server. Showing/hiding a frontend feature is not authorization.
-
-Feature keys use `snake_case`. Supported types are `boolean`, `integer`, and `number`. Numeric values are non-negative; `-1` is accepted only when `allow_unlimited` is true. Omitted values use developer defaults. Unknown keys and wrong value types are rejected by both the manager functions and admin endpoints. Removing a key from the developer catalog immediately stops exposing it; changing a key/type requires an application data migration/review.
-
-Example: create **Starter** with `uploads = true`, `storage_gb = 10`, and **Pro** with `uploads = true`, `storage_gb = 100`. Both use the same developer feature definitions, with different admin-assigned limits. Features are returned as display labels (`features`), typed values (`entitlements`), and numeric values (`limits`). Pennant's `features` config remains a **separate rollout system**, not your paid entitlement source.
-
-A plan must offer at least one of monthly/yearly, each with a display amount and a distinct Stripe `price_...` ID. Create the prices in Stripe first, using the configured currency and matching recurring intervals. LaraSaaS does not create Stripe products/prices or validate their remote amounts; Stripe's price is what gets charged. Display amounts do not change Stripe charges.
-
-Plan keys and Stripe Price IDs cannot be changed after creation through the manager functions or dashboard. Archive an old plan and create a new one for price changes. Archives stop new checkouts/swaps into that plan but preserve subscription-to-plan lookup and entitlements for existing subscribers. Feature edits apply to current subscribers too. There is no destructive delete button.
-
-### Who can open the admin panels
-
-The optional admin UI (`/app/admin/plans`, `/app/admin/announcements`, `/app/admin/features`, served in `inertia`/`all` mode) sits behind `route.admin_middleware`, which defaults to `['web', 'auth', 'can:larasaas-admin']`. LaraSaaS ships no roles table, so the package defines a default `larasaas-admin` Gate that decides in this order:
-
-| # | Condition | Who gets in |
+| Your setup | Mode | What you get |
 |---|---|---|
-| 1 | `LARASAAS_ADMIN_EMAILS` is set | **Only** those e-mails. The `larasaas_admin` attribute is ignored. |
-| 2 | Otherwise, the user has a `larasaas_admin` attribute (column or accessor) | Users where it is truthy |
-| 3 | Neither | **Nobody.** Every admin page returns 403 |
-
-**Quickest setup:** add your e-mail to `.env`, comma-separated for several admins:
+| Laravel + React in **one project** (Inertia) | `inertia` (default) | Ready-made pages and React components |
+| React SPA on **another server**, or **Flutter / iOS / Android** | `api` | A JSON API. You build your own UI |
+| Same as above, but you **don't want to build the UI** | `embed` | Pricing/billing pages you place in an `<iframe>` or WebView |
+| Several of the above | `all` | Every surface at once |
+| Fully custom | `custom` | Only the Stripe webhook; build on the `LaraSaaS` facade |
 
 ```env
-LARASAAS_ADMIN_EMAILS="you@yourapp.com,ops@yourapp.com"
+LARASAAS_INTEGRATION_MODE=inertia
 ```
 
-E-mails are trimmed and compared **exactly, including case**, so store them the same way your `users.email` column does.
+You can switch at any time. The mode only decides which routes are registered.
 
-**Already have roles/permissions?** Leave the variable empty and redefine the Gate. Your `AppServiceProvider` boots after the package, so your definition replaces the default:
+### Inertia mode
 
-```php
-// app/Providers/AppServiceProvider.php
-use Illuminate\Support\Facades\Gate;
+Pages: `/app/pricing`, `/app/billing`, `/app/dashboard`, `/app/admin/*` and `/app/workspaces` (multi-tenant).
 
-public function boot(): void
-{
-    Gate::define('larasaas-admin', fn ($user) => $user->hasRole('admin'));
-}
-```
-
-You can also swap the whole stack (`route.admin_middleware`), for example to a `can:manage-billing` ability you already have.
-
-**Not using the shipped admin UI?** In `api`/`embed` mode, or when you manage plans from your own dashboard, you can ignore this setting completely. Authorize your own routes as shown below. The same `larasaas-admin` ability is available if you want to reuse it.
-
-### Your own dashboard (no admin embed)
-
-Render your plan form in **your** dashboard (Blade, Livewire, Filament, React, etc.). Submit it to your own authenticated, authorized controller and call the package on the server:
-
-```php
-use Illuminate\Http\Request;
-use Illuminate\Support\Facades\Route;
-use LaraSaaS\Facades\LaraSaaS;
-use LaraSaaS\Models\Plan;
-
-// routes/web.php — includes the host's normal session and CSRF protection.
-Route::middleware(['auth', 'can:larasaas-admin'])->prefix('dashboard')->group(function () {
-    Route::post('/plans', function (Request $request) {
-        $plan = LaraSaaS::createPlan($request->all());
-
-        return response()->json(['data' => $plan], 201);
-    });
-
-    Route::patch('/plans/{plan}', function (Request $request, Plan $plan) {
-        return response()->json(['data' => LaraSaaS::updatePlan($plan, $request->all())]);
-    });
-
-    Route::delete('/plans/{plan}', function (Plan $plan) {
-        LaraSaaS::archivePlan($plan); // does not delete subscription mappings
-
-        return response()->noContent();
-    });
-});
-```
-
-Example attributes sent by the form (replace the sample ID with a real Stripe Price ID):
-
-```php
-$plan = LaraSaaS::createPlan([
-    'key' => 'starter',
-    'name' => 'Starter',
-    'monthly' => ['price' => 9, 'stripe_id' => 'price_your_monthly_id'],
-    'features' => ['uploads' => true, 'storage_gb' => 10],
-]);
-
-LaraSaaS::updatePlan($plan, ['name' => 'Starter Plus']); // omitted fields are preserved
-LaraSaaS::archivePlan($plan);
-LaraSaaS::updatePlan($plan, ['active' => true]); // restore
-```
-
-All three functions return a `LaraSaaS\Models\Plan` model and work in **every integration mode**, including `custom`, commands and seeders. `createPlan()` defaults to active, not highlighted, sort order zero, and developer-defined feature defaults. `updatePlan()` accepts partial attributes; when supplied, `features`, `monthly` and `yearly` replace their respective maps (they are not recursively merged). Validation failures throw Laravel's `ValidationException`, which produces normal form errors or HTTP 422 for JSON requests. Unknown top-level attributes are discarded; unknown feature keys are rejected. Plan keys and Stripe IDs remain immutable, including archived price mappings.
-
-**Authorization belongs to your host controller.** These are trusted server-side functions, not public endpoints, and do not perform an implicit Gate check. Use your own admin policy or `can:larasaas-admin` as above. Do not expose writes on guest pricing routes. Direct `Plan::create()` bypasses package validation; use the manager functions for dashboard input. No function creates Stripe products or charges users.
-
-### Enforce upload and storage limits
-
-```php
-use LaraSaaS\Facades\LaraSaaS;
-
-abort_unless(LaraSaaS::allows($request, 'uploads'), 403);
-
-// Use the same units as your catalog. This example uses decimal GB.
-$projectedGb = ($usedBytes + $request->file('file')->getSize()) / 1_000_000_000;
-abort_unless(LaraSaaS::allows($request, 'storage_gb', $projectedGb), 403);
-
-$limit = LaraSaaS::entitlement($request, 'storage_gb'); // 10, 100, -1, or 0
-```
-
-`entitlement()` resolves the configured billable user/workspace and its valid Cashier subscription (including trial/grace rules). Guests, expired subscriptions, and unmapped prices receive `false`/`0`; unknown features return `null`. `allows()` fails closed on unknown features, negative/invalid usage and zero limits. An archived plan still grants its existing subscribers their entitlements. Keep Cashier webhook processing current.
-
-These helpers **do not track, reserve or deduct usage**, nor upload files. Your application owns usage accounting and must use transactional locking/reservations to prevent simultaneous uploads exceeding a quota. For multi-item subscriptions, add application-specific entitlement resolution; the built-in helper maps the subscription's single `stripe_price`.
-
-### Schema baseline and version 4
-
-Version 4 keeps the migration philosophy of v3 (no legacy/additive paths) and ships **two** table-creation migrations: the single-tenant baseline (`2026_10_14_000000_create_larasaas_schema.php` — plans, announcements, dismissals, setup stamps and the config-driven Cashier customer columns) and the optional multi-tenant workspace schema (`2026_10_14_000001_create_larasaas_workspaces_schema.php` — workspaces, members, invitations; published only when the project is multi-tenant). Fresh projects run `php artisan larasaas:install --mode=YOUR_MODE --migrate`; define your feature catalog and create real plans through your dashboard. Plans are database records, not config entries or hard-coded sample rows.
-
-The baseline migration keeps the same filename/schema as the 2.0/3.0 fresh-install baseline, so a project that already published it can keep it. Re-running the installer preserves published files, including host edits and renamed timestamps, even with `--force`.
-
-The **customer columns follow your config**: they are created on the table of the configured `larasaas.user_model` (or the configured workspace model for workspace billing) — never on a hardcoded `users` table. The migration stamps which model/table it built for in `larasaas_settings`, and `php artisan larasaas:doctor` alerts you (console + one-time boot log warning) whenever the model in config drifts from what the database was migrated for.
-
-There is **no automatic upgrade from the older split migrations** in this release. If experimenting with an older version in a disposable, unused app, reset that development database and remove only the old LaraSaaS migration files before installing the baseline. Never run a fresh baseline over existing tables or reset a database containing real data. Existing deployments with split migrations need an explicitly reviewed host migration plan; keep the old package version until that is prepared.
-
-For an existing baseline installation, update Composer's constraint to `^1.0`, review published config/views/components, clear Laravel caches, and rebuild any changed frontend assets. Back up customizations before force-publishing assets. Billing routes remain authenticated; only pricing is public. Already-migrated 3.x installs that want the new stamps/columns/workspace tables should follow whatever `php artisan larasaas:doctor` reports.
-
-## Release and deployment
-
-This repository is a Composer library, not a hosted Laravel service. Releases use semantic Git tags and GitHub releases; Packagist can index the tag via its GitHub integration; verify the new version is listed, or request an update in Packagist if auto-update is not configured. Consumer apps must run `composer update hasan-deeba/larasaas --with-all-dependencies`, install/publish the migration, migrate, rebuild published assets, and deploy through their own pipeline. The `demo/` Next.js site is only a development showcase, not the billing backend. Never treat demo sample plans as the production plan catalog.
-
-## Using the pieces
-
-### Gate routes behind a subscription
-
-```php
-Route::middleware('larasaas.subscribed')->group(/* … */);
-Route::get('/reports', ReportController::class)->middleware('larasaas.subscribed:price_123');
-```
-
-### Gate code/UI behind a rollout flag (not a paid entitlement)
-
-```php
-use Laravel\Pennant\Feature;
-
-if (Feature::for($request->user())->active('ai-assistant')) { /* … */ }
-```
+Use the components in your own pages:
 
 ```tsx
+import AnnouncementStack from './LaraSaaS/components/AnnouncementStack';
+import { FeatureGate, LaraSaaSFeaturesProvider } from './LaraSaaS/components/FeatureGate';
+
+<AnnouncementStack variant="floating" />   {/* or "inline" */}
+
 <LaraSaaSFeaturesProvider>
     <FeatureGate flag="ai-assistant" fallback={<UpgradeCard />}>
         <AssistantPanel />
@@ -640,67 +221,402 @@ if (Feature::for($request->user())->active('ai-assistant')) { /* … */ }
 </LaraSaaSFeaturesProvider>
 ```
 
-### Mount announcements anywhere
+### API mode
 
-```tsx
-import AnnouncementStack from './LaraSaaS/components/AnnouncementStack';
+All endpoints live under `/api/larasaas`:
 
-<AnnouncementStack variant="floating" />  {/* or "inline" */}
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/pricing` | **Public.** Every plan, price, interval and feature |
+| `GET` | `/subscription` | Current subscription state |
+| `GET` | `/invoices` | Recent invoices with PDF links |
+| `POST` | `/billing/subscribe/{plan}` | Returns a Stripe Checkout `url`. Body: `interval` |
+| `POST` | `/billing/swap/{plan}` | Change plan (prorated). Body: `interval` |
+| `POST` | `/billing/cancel` | Cancel at period end |
+| `POST` | `/billing/resume` | Resume a cancelled subscription |
+| `POST` | `/billing/portal` | Returns the Stripe customer portal `url` |
+| `GET` | `/announcements` · `/features` | Announcements and feature flags |
+
+**Authentication.** Choose the row that matches your app in `config/larasaas.php`:
+
+| Your auth | `route.api_middleware` | `route.public_api_middleware` | `route.pricing_guard` |
+|---|---|---|---|
+| Session (same project) | `['web', 'auth']` | `['web']` | `null` |
+| Sanctum (SPA or mobile tokens) | `['api', 'auth:sanctum']` | `['api']` | `'sanctum'` |
+| Passport | `['api', 'auth:api']` | `['api']` | `'api'` |
+
+**CORS** is only for browser SPAs on another domain (Flutter/mobile don't need it):
+
+```env
+LARASAAS_API_CORS_ORIGINS=https://app.example.com
 ```
 
-## Theming & i18n
+**Example:**
 
-- Tokens (`--ls-*`) are defined for **light and dark** and switch with your existing `.dark` class (or `prefers-color-scheme` when no class is present). No extra wiring.
-- Set your brand color once: `'theme' => ['accent' => '#7c3aed']` — or override `--larasaas-accent` in your CSS.
-- Components follow your app's locale (`app()->getLocale()`) automatically and are RTL-aware. There is nothing to configure.
+```ts
+const { data: pricing } = await fetch('https://api.yourapp.com/api/larasaas/pricing')
+    .then(r => r.json());
 
-### Translations: add or edit a language
+const { url } = await fetch('https://api.yourapp.com/api/larasaas/billing/subscribe/starter', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` },
+    body: JSON.stringify({ interval: 'monthly' }),
+}).then(r => r.json());
 
-LaraSaaS ships **English, French and Arabic**. The text follows whatever locale your app sets (`App::setLocale()`, a middleware, a user setting…). Languages without a file fall back to your `app.fallback_locale`.
-
-**1. Publish the translation files**
-
-```bash
-php artisan vendor:publish --tag=larasaas-lang
+window.location.href = url; // go to Stripe Checkout
 ```
 
-This copies them to your project:
+### Embed mode
 
-```
-lang/vendor/larasaas/
-├── en/larasaas.php
-├── fr/larasaas.php
-└── ar/larasaas.php
-```
-
-**2. Add a language:** copy the English folder and translate the values (keep the keys):
-
-```bash
-cp -r lang/vendor/larasaas/en lang/vendor/larasaas/nl
-```
+Server-rendered pages with no Node/Vite build: `/embed/pricing` and `/embed/billing`.
 
 ```php
-// lang/vendor/larasaas/nl/larasaas.php
-'pricing' => [
-    'title' => 'Prijzen',   // was 'Pricing'
-    // ...
+use LaraSaaS\Facades\LaraSaaS;
+
+$pricing = LaraSaaS::embedUrl();                            // public, no login needed
+$billing = LaraSaaS::embedUrl($request->user(), 'billing'); // signed link, expires in 60 min
+```
+
+```html
+<iframe src="{{ $billing }}" width="100%" height="720" style="border:0"></iframe>
+```
+
+- Generate signed links **on your server** for the logged-in user, never from a user ID sent by the client.
+- Checkout and the Stripe portal open in the full window, not inside the frame.
+- Limit which sites may embed the pages:
+
+```env
+LARASAAS_EMBED_FRAME_ANCESTORS=https://app.example.com
+```
+
+> Embeds are for customers only. Never embed admin pages.
+
+---
+
+## Plans & limits
+
+**Who does what:**
+
+- **Developer:** defines the available features in `config/larasaas.php`.
+- **Admin:** creates plans and sets feature values (in your dashboard or `/app/admin/plans`).
+- **Your app:** enforces the limits on the server.
+
+### 1. Define features (config)
+
+```php
+'plan_features' => [
+    'uploads'    => ['label' => 'File uploads', 'type' => 'boolean', 'default' => false],
+    'storage_gb' => ['label' => 'Storage', 'type' => 'integer', 'unit' => 'GB', 'default' => 0, 'allow_unlimited' => true],
 ],
 ```
 
-**3. Done.** When your app's locale is `nl`, the React pages, embed pages and messages use your Dutch file. No config change is needed.
+Types: `boolean`, `integer`, `number`. `-1` means unlimited when `allow_unlimited` is true.
 
-To **change existing wording**, edit the published file of that language, e.g. `lang/vendor/larasaas/en/larasaas.php`. Your copy overrides the package's.
-
-**Right-to-left languages:** `ar`, `he`, `fa` and `ur` render RTL automatically, including region variants like `ar_SA`. Add more in `config/larasaas.php`:
+### 2. Manage plans (from any dashboard)
 
 ```php
-'rtl_locales' => ['ar', 'he', 'fa', 'ur', 'ps'],
+use LaraSaaS\Facades\LaraSaaS;
+
+$plan = LaraSaaS::createPlan([
+    'key'      => 'pro',
+    'name'     => 'Pro',
+    'monthly'  => ['price' => 29,  'stripe_id' => 'price_monthly_id'],
+    'yearly'   => ['price' => 290, 'stripe_id' => 'price_yearly_id'],
+    'features' => ['uploads' => true, 'storage_gb' => 100],
+]);
+
+LaraSaaS::updatePlan($plan, ['name' => 'Pro Plus']); // partial update
+LaraSaaS::archivePlan($plan);                        // hide from new customers
+LaraSaaS::updatePlan($plan, ['active' => true]);     // restore
 ```
 
-## Developing the package locally
+- Protect these calls with your own admin check (e.g. `can:larasaas-admin`).
+- Plan `key` and Stripe price IDs can't change after creation. To change a price, archive the plan and create a new one.
+- Archived plans keep working for existing subscribers.
+- LaraSaaS never creates Stripe products or prices. Create them in Stripe first.
+
+### 3. Enforce limits (server side)
+
+```php
+abort_unless(LaraSaaS::allows($request, 'uploads'), 403);
+abort_unless(LaraSaaS::allows($request, 'storage_gb', $usedGb + $newFileGb), 403);
+
+$limit = LaraSaaS::entitlement($request, 'storage_gb'); // e.g. 100, -1 or 0
+```
+
+> LaraSaaS checks limits; it doesn't track usage. Your app counts usage.
+
+---
+
+## Subscriptions
+
+**Protect routes:**
+
+```php
+Route::middleware('larasaas.subscribed')->group(/* ... */);
+Route::get('/reports', ReportController::class)->middleware('larasaas.subscribed:price_123'); // specific price
+```
+
+**React to changes** (welcome e-mails, seat limits, caches…):
+
+```php
+use LaraSaaS\Events\SubscriptionChanged;
+
+Event::listen(SubscriptionChanged::class, function (SubscriptionChanged $event) {
+    // ...
+});
+```
+
+**Trials, promo codes and VAT IDs** are set in `config/larasaas.php` → `billing`. Trials are given on the first subscription only.
+
+---
+
+## Multi-tenant workspaces & teams
+
+Turn it on **before** running migrations:
+
+```bash
+php artisan larasaas:install --multi-tenant
+php artisan migrate
+```
+
+**What you get:** workspaces, Owner/Admin/Member roles, e-mail invitations with expiring links, the `/app/workspaces` pages and a JSON API.
+
+**What your app still does:**
+
+1. Adds a `workspace_id` column to your own tables and filters by it.
+2. Sends the invitation e-mail. LaraSaaS creates the invitation and its token.
+
+```php
+$workspace = LaraSaaS::createWorkspace($user, ['name' => 'Acme Inc']); // creator becomes Owner
+
+$invitation = LaraSaaS::inviteMember($workspace, $user, 'sara@acme.com', 'admin');
+Mail::to($invitation->email)->send(new TeamInvite($invitation)); // your mailable
+
+LaraSaaS::acceptInvitation($token, $sara);
+LaraSaaS::hasWorkspaceRole($workspace, $sara, 'admin'); // true for admin and owner
+```
+
+| | Owner | Admin | Member |
+|---|---|---|---|
+| Invite people | ✓ any role | ✓ except owner | ✗ |
+| Change roles | ✓ | ✗ | ✗ |
+| Remove people | ✓ except the last owner | members only | ✗ |
+
+**Bill the company instead of each user:**
+
+```php
+// app/Models/Workspace.php — must EXTEND the package model
+class Workspace extends \LaraSaaS\Models\Workspace
+{
+    use \Laravel\Cashier\Billable;
+}
+```
+
+```env
+LARASAAS_WORKSPACE_MODEL=App\Models\Workspace
+LARASAAS_BILLABLE=workspace
+```
+
+```php
+// AppServiceProvider::boot()
+\Laravel\Cashier\Cashier::useCustomerModel(\App\Models\Workspace::class);
+```
+
+<details>
+<summary>Workspace API endpoints</summary>
+
+| Method | Endpoint | Purpose |
+|---|---|---|
+| `GET` | `/api/larasaas/workspaces` | The user's workspaces |
+| `POST` | `/api/larasaas/workspaces` | Create a workspace |
+| `GET` | `/api/larasaas/workspaces/{id}` | Workspace details |
+| `GET` | `/api/larasaas/workspaces/{id}/members` | Members and roles |
+| `POST` | `/api/larasaas/workspaces/{id}/invitations` | Invite (`email`, `role`) |
+| `GET` | `/api/larasaas/workspaces/{id}/invitations` | List invitations |
+| `DELETE` | `/api/larasaas/workspaces/{id}/invitations/{invitation}` | Revoke an invitation |
+| `GET` | `/api/larasaas/invitations/{token}` | Preview an invitation |
+| `POST` | `/api/larasaas/invitations/{token}/accept` | Accept an invitation |
+| `PUT` | `/api/larasaas/workspaces/{id}/members/{user}/role` | Change a role (Owners) |
+| `DELETE` | `/api/larasaas/workspaces/{id}/members/{user}` | Remove a member |
+
+</details>
+
+---
+
+## Announcements
+
+Admins post banners from **`/app/admin/announcements`**: types, colors, schedules, call-to-action buttons and dismissible messages.
+
+```tsx
+<AnnouncementStack variant="floating" />
+```
+
+Add your own type in `config/larasaas.php`:
+
+```php
+'announcements' => [
+    'poll_seconds' => 60, // 0 = no polling
+    'types' => [
+        'maintenance' => ['color' => '#64748b', 'icon' => 'alert-triangle'],
+    ],
+],
+```
+
+---
+
+## Feature flags
+
+Roll features out gradually, separately from paid plans:
+
+```php
+'features' => [
+    'ai-assistant'  => ['enabled' => false],
+    'new-dashboard' => ['percentage' => 50],
+    'beta-reports'  => ['workspaces' => [1, 4]],
+    'concierge'     => ['emails' => ['vip@yourapp.com']],
+],
+```
+
+```php
+use Laravel\Pennant\Feature;
+
+if (Feature::for($request->user())->active('ai-assistant')) { /* ... */ }
+
+Route::get('/beta', BetaController::class)->middleware('larasaas.feature:beta-reports');
+```
+
+Toggle flags from **`/app/admin/features`**.
+
+---
+
+## Admin panels
+
+`/app/admin/plans`, `/app/admin/announcements` and `/app/admin/features` (inertia mode) are protected by the `larasaas-admin` Gate:
+
+| # | Condition | Who gets in |
+|---|---|---|
+| 1 | `LARASAAS_ADMIN_EMAILS` is set | Only those e-mails (exact match) |
+| 2 | Otherwise | Users with a truthy `larasaas_admin` attribute |
+| 3 | Neither | Nobody (403) |
+
+**Already have roles?** Redefine the Gate:
+
+```php
+// AppServiceProvider::boot()
+Gate::define('larasaas-admin', fn ($user) => $user->hasRole('admin'));
+```
+
+---
+
+## Theming & translations
+
+### Theme
+
+- Follows your `.dark` class (or the system setting) automatically.
+- Brand color: `'theme' => ['accent' => '#7c3aed']`, or `--larasaas-accent` in your CSS.
+
+### Translations
+
+LaraSaaS ships **English, French and Arabic** and follows your app's locale (`App::setLocale()`). Missing languages fall back to your `app.fallback_locale`.
+
+**Add a language:**
+
+```bash
+php artisan vendor:publish --tag=larasaas-lang
+cp -r lang/vendor/larasaas/en lang/vendor/larasaas/nl
+```
+
+Translate the values in `lang/vendor/larasaas/nl/larasaas.php` (keep the keys). That's it.
+
+**Change existing wording:** edit the published file, e.g. `lang/vendor/larasaas/en/larasaas.php`.
+
+**Right-to-left:** `ar`, `he`, `fa` and `ur` (including `ar_SA` etc.) are RTL automatically. Add more with `'rtl_locales' => [...]`.
+
+---
+
+## Configuration reference
+
+Everything lives in `config/larasaas.php`, with comments and examples for every key.
+
+| Section | What it controls |
+|---|---|
+| `user_model` | Your user model (default `App\Models\User`) |
+| `admin_emails` | Who can open the admin panels |
+| `route` | URLs, domain, route names and middleware for every surface |
+| `integration` | Mode, CORS origins, embed framing and link lifetime |
+| `multi_tenant` | Workspaces, models, roles and invitations |
+| `billing` | Who pays, trials, promo codes, VAT IDs |
+| `plan_features` | Your feature catalog |
+| `pricing` | Currencies, intervals and display options |
+| `announcements` | Polling and announcement types |
+| `features` | Feature flags |
+| `theme` · `rtl_locales` | Look, feel and text direction |
+
+**Common `.env` keys:**
+
+```env
+LARASAAS_INTEGRATION_MODE=inertia
+LARASAAS_MULTI_TENANT=false
+LARASAAS_BILLABLE=user
+LARASAAS_ADMIN_EMAILS=you@yourapp.com
+LARASAAS_PREFIX=app
+LARASAAS_API_CORS_ORIGINS=
+LARASAAS_EMBED_FRAME_ANCESTORS=*
+```
+
+---
+
+## Artisan commands
+
+| Command | Purpose |
+|---|---|
+| `php artisan larasaas:install` | Set up the package (`--mode=`, `--multi-tenant`, `--no-multi-tenant`, `--migrate`, `--force`) |
+| `php artisan larasaas:doctor` | Check your setup, e.g. missing tables, or a user model changed after migrating |
+| `php artisan vendor:publish --tag=larasaas-lang` | Publish translations |
+
+---
+
+## Troubleshooting
+
+**`ext-bcmath` is missing**
+Install it for the PHP version Composer uses: `sudo apt install php-bcmath` (Debian/Ubuntu) or `sudo dnf install php-bcmath` (Fedora/RHEL). Homebrew PHP already includes it. Don't use `--ignore-platform-req`, because billing would fail at runtime.
+
+**"model must use the Laravel\Cashier\Billable trait"**
+Add `use Billable;` to the model that pays: the User, or your Workspace with `LARASAAS_BILLABLE=workspace`.
+
+**Admin pages return 403**
+Set `LARASAAS_ADMIN_EMAILS` or redefine the `larasaas-admin` Gate. See [Admin panels](#admin-panels).
+
+**Subscriptions don't update after payment**
+Check the webhook URL and that `STRIPE_WEBHOOK_SECRET` matches. Locally, keep `stripe listen` running.
+
+**Inertia says the page was not found**
+Update the `resolve` function in `app.tsx` (Quick start, step 9).
+
+**Changed the user model after migrating**
+Run `php artisan larasaas:doctor`. It tells you exactly what to fix.
+
+**Composer only finds `dev-main`**
+Use `composer require hasan-deeba/larasaas:^1.0`, and check the [releases page](https://github.com/hasan-deeba/LaraSaaS/releases).
+
+---
+
+## Versioning
+
+LaraSaaS follows [semantic versioning](https://semver.org). Require `^1.0` so `composer update` only brings non-breaking updates. See [CHANGELOG.md](CHANGELOG.md).
+
+```bash
+composer update hasan-deeba/larasaas
+```
+
+---
+
+## Contributing
+
+**Use a local copy in a host app:**
 
 ```json
-// host composer.json
 "repositories": [{ "type": "path", "url": "./packages/larasaas", "options": { "symlink": true } }]
 ```
 
@@ -708,29 +624,24 @@ To **change existing wording**, edit the published file of that language, e.g. `
 composer require hasan-deeba/larasaas @dev
 ```
 
-## Repository layout (for contributors)
-
-This repository **is** the composer package — `composer.json` sits at the root, exactly how Packagist expects it:
+**Repository layout:**
 
 ```
-composer.json          the package manifest (auto-discovery wired)
-config/                larasaas.php — every knob, documented
-src/                   PHP namespace LaraSaaS (PSR-4)
-routes/                web.php, api.php, workspaces-*.php, webhook.php
-database/migrations/   two migrations: the baseline (plans, announcements,
-                       dismissals, settings, config-driven billing columns)
-                       and the optional multi-tenant workspace/team schema
-resources/js/          React components & Inertia pages (published into host apps)
-resources/lang/        EN / FR / AR translations
-resources/views/       Inertia fallback root view + standalone embed pages
-demo/                  interactive showcase site (Next.js) — DEV ONLY,
-                       export-ignored via .gitattributes, never shipped
-tests/                 Pest/PHPUnit regression suite
-AGENTS.md              contributor and AI-agent architecture/test guidance
+config/              larasaas.php: every setting, documented
+src/                 PHP source (namespace LaraSaaS)
+routes/              web, api, embed, workspaces and webhook routes
+database/migrations/ core schema + optional workspace schema
+resources/js/        React pages & components (published into host apps)
+resources/lang/      EN / FR / AR translations
+resources/views/     embed pages
+tests/               PHPUnit test suite
+demo/                showcase site (development only, not shipped)
 ```
 
-Consumers installing through Composer receive only `composer.json`, `config/`, `src/`, `routes/`, `database/`, `resources/`, `README.md`, `CHANGELOG.md` and `LICENSE`. Everything development-facing (demo site, tests, CI) is stripped from dist archives by `.gitattributes`.
+Composer installs ship only `config/`, `src/`, `routes/`, `database/`, `resources/`, `README.md`, `CHANGELOG.md` and `LICENSE`.
+
+---
 
 ## License
 
-MIT — see [LICENSE](./LICENSE).
+MIT. See [LICENSE](./LICENSE).
