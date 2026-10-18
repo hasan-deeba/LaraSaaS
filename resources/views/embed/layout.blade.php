@@ -1,7 +1,7 @@
 <!DOCTYPE html>
 @php
-    $locale = config('larasaas.locale') ?: app()->getLocale();
-    $dir    = in_array($locale, ['ar', 'he', 'fa']) ? 'rtl' : 'ltr';
+    $locale = app()->getLocale();
+    $dir    = \LaraSaaS\Facades\LaraSaaS::textDirection($locale);
     $accent = \LaraSaaS\Facades\LaraSaaS::accentColor();
 @endphp
 <html lang="{{ str_replace('_', '-', $locale) }}" dir="{{ $dir }}">

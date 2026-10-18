@@ -2,6 +2,24 @@
 
 All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
+## Unreleased
+
+### Added
+
+- `rtl_locales` config and `LaraSaaS::textDirection()`: right-to-left detection is configurable and matches region variants (`ar_SA` → `ar`). `ur` is now RTL by default.
+- `announcements.poll_seconds = 0` loads announcements once without polling.
+- README guide for publishing and adding translations (`--tag=larasaas-lang`).
+
+### Removed
+
+- Unused config keys `announcements.history_days` and `locales` (never read by the package).
+- `locale` config: it changed `<html lang>` but not the translated text. LaraSaaS now always follows the host's `app()->getLocale()`.
+
+### Fixed
+
+- Checkout no longer crashes with `BadMethodCallException` (`hasEverSubscribed()` does not exist in Cashier) for plans without their own trial days.
+- Free trials (global or per-plan) are now granted on the first subscription only; returning customers no longer receive a plan-level trial again.
+
 ## 4.0.0 — 2026-10-15
 
 ### Breaking changes

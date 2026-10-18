@@ -36,8 +36,7 @@ class BillingActions
         }
 
         $priceId = $planConfig[$interval]['stripe_id'];
-        $trial   = $planConfig['trial_days']
-            ?? ($billable->hasEverSubscribed($name) ? 0 : config('larasaas.billing.trial_days'));
+        $trial   = $this->trialDays($billable, $planConfig, $name);
 
         $checkout = $billable
             ->newSubscription($name, $priceId)
@@ -50,6 +49,26 @@ class BillingActions
             ]);
 
         return ['action' => 'checkout', 'url' => $checkout->url];
+    }
+
+    /**
+     * Trial length for a new Checkout: the plan's own `trial_days`, else
+     * `billing.trial_days`. Only the first subscription gets a trial, so
+     * cancelling and re-subscribing never earns a second one.
+     */
+    protected function trialDays($billable, array $planConfig, string $name): int
+    {
+        if ($this->hasSubscribedBefore($billable, $name)) {
+            return 0;
+        }
+
+        return max(0, (int) ($planConfig['trial_days'] ?? config('larasaas.billing.trial_days')));
+    }
+
+    /** Cashier keeps ended subscriptions, so any row means "subscribed before". */
+    protected function hasSubscribedBefore($billable, string $name): bool
+    {
+        return $billable->subscriptions()->where('type', $name)->exists();
     }
 
     /** Swap between plans / intervals (prorated by Cashier). */

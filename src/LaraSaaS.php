@@ -384,6 +384,24 @@ class LaraSaaS
 
     /*
     |--------------------------------------------------------------------------
+    | Locale
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * 'rtl' or 'ltr' for a locale (default: the host's current locale).
+     * Region variants match their language: ar_SA / ar-EG → ar.
+     */
+    public function textDirection(?string $locale = null): string
+    {
+        $language = strtolower(explode('-', str_replace('_', '-', $locale ?? app()->getLocale()))[0]);
+        $rtl = array_map('strtolower', (array) config('larasaas.rtl_locales', ['ar', 'he', 'fa', 'ur']));
+
+        return in_array($language, $rtl, true) ? 'rtl' : 'ltr';
+    }
+
+    /*
+    |--------------------------------------------------------------------------
     | Integration mode
     |--------------------------------------------------------------------------
     */

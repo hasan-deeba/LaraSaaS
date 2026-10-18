@@ -23,6 +23,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static string|null planKeyForPrice(?string $priceId)
  * @method static array announcementTypes()
  * @method static array announcementType(string $type)
+ * @method static string textDirection(?string $locale = null)
  * @method static array featureDefinitions()
  * @method static bool isAdmin(\Illuminate\Contracts\Auth\Authenticatable $user)
  * @method static string routeName(string $name)

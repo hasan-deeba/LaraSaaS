@@ -44,8 +44,9 @@ export default function AnnouncementStack({ variant = 'floating', limit = 5, cla
 
     useEffect(() => {
         load();
-        const every = Math.max(10, (laraSaaS().poll_seconds ?? 60)) * 1000;
-        const timer = window.setInterval(load, every);
+        const seconds = laraSaaS().poll_seconds ?? 60;
+        if (seconds <= 0) return undefined; // 0 = load once, no polling
+        const timer = window.setInterval(load, Math.max(10, seconds) * 1000);
         return () => window.clearInterval(timer);
     }, [load]);
 

@@ -487,7 +487,7 @@ Combine multi-tenancy with `billing.billable = workspace` to give **each workspa
 ### Responsibilities
 
 - **Developer:** implement the capability and declare its stable key/type in `plan_features`. Config is version-controlled, supports `config:cache`, and prevents dashboard users from inventing executable capabilities. An application enum may hold the same keys if you want compile-time references in your own code; no database enum migration is needed when adding a feature.
-- **Admin:** manage plans through the host application’s protected dashboard. The developer calls `LaraSaaS::createPlan()`, `updatePlan()` and `archivePlan()`; no iframe or Inertia dependency is needed. The optional `/app/admin/plans` UI in `inertia`/`all` mode uses the same validated functions and requires the `larasaas-admin` Gate (configure `LARASAAS_ADMIN_EMAILS`).
+- **Admin:** manage plans through the host application’s protected dashboard. The developer calls `LaraSaaS::createPlan()`, `updatePlan()` and `archivePlan()`; no iframe or Inertia dependency is needed. The optional `/app/admin/plans` UI in `inertia`/`all` mode uses the same validated functions and requires the `larasaas-admin` Gate (see [Who can open the admin panels](#who-can-open-the-admin-panels)).
 - **Application:** enforce entitlements on the server. Showing/hiding a frontend feature is not authorization.
 
 Feature keys use `snake_case`. Supported types are `boolean`, `integer`, and `number`. Numeric values are non-negative; `-1` is accepted only when `allow_unlimited` is true. Omitted values use developer defaults. Unknown keys and wrong value types are rejected by both the manager functions and admin endpoints. Removing a key from the developer catalog immediately stops exposing it; changing a key/type requires an application data migration/review.
@@ -497,6 +497,40 @@ Example: create **Starter** with `uploads = true`, `storage_gb = 10`, and **Pro*
 A plan must offer at least one of monthly/yearly, each with a display amount and a distinct Stripe `price_...` ID. Create the prices in Stripe first, using the configured currency and matching recurring intervals. LaraSaaS does not create Stripe products/prices or validate their remote amounts; Stripe's price is what gets charged. Display amounts do not change Stripe charges.
 
 Plan keys and Stripe Price IDs cannot be changed after creation through the manager functions or dashboard. Archive an old plan and create a new one for price changes. Archives stop new checkouts/swaps into that plan but preserve subscription-to-plan lookup and entitlements for existing subscribers. Feature edits apply to current subscribers too. There is no destructive delete button.
+
+### Who can open the admin panels
+
+The optional admin UI (`/app/admin/plans`, `/app/admin/announcements`, `/app/admin/features`, served in `inertia`/`all` mode) sits behind `route.admin_middleware`, which defaults to `['web', 'auth', 'can:larasaas-admin']`. LaraSaaS ships no roles table, so the package defines a default `larasaas-admin` Gate that decides in this order:
+
+| # | Condition | Who gets in |
+|---|---|---|
+| 1 | `LARASAAS_ADMIN_EMAILS` is set | **Only** those e-mails. The `larasaas_admin` attribute is ignored. |
+| 2 | Otherwise, the user has a `larasaas_admin` attribute (column or accessor) | Users where it is truthy |
+| 3 | Neither | **Nobody.** Every admin page returns 403 |
+
+**Quickest setup:** add your e-mail to `.env`, comma-separated for several admins:
+
+```env
+LARASAAS_ADMIN_EMAILS="you@yourapp.com,ops@yourapp.com"
+```
+
+E-mails are trimmed and compared **exactly, including case**, so store them the same way your `users.email` column does.
+
+**Already have roles/permissions?** Leave the variable empty and redefine the Gate. Your `AppServiceProvider` boots after the package, so your definition replaces the default:
+
+```php
+// app/Providers/AppServiceProvider.php
+use Illuminate\Support\Facades\Gate;
+
+public function boot(): void
+{
+    Gate::define('larasaas-admin', fn ($user) => $user->hasRole('admin'));
+}
+```
+
+You can also swap the whole stack (`route.admin_middleware`), for example to a `can:manage-billing` ability you already have.
+
+**Not using the shipped admin UI?** In `api`/`embed` mode, or when you manage plans from your own dashboard, you can ignore this setting completely. Authorize your own routes as shown below. The same `larasaas-admin` ability is available if you want to reuse it.
 
 ### Your own dashboard (no admin embed)
 
@@ -618,7 +652,50 @@ import AnnouncementStack from './LaraSaaS/components/AnnouncementStack';
 
 - Tokens (`--ls-*`) are defined for **light and dark** and switch with your existing `.dark` class (or `prefers-color-scheme` when no class is present). No extra wiring.
 - Set your brand color once: `'theme' => ['accent' => '#7c3aed']` — or override `--larasaas-accent` in your CSS.
-- Components follow the host locale automatically (`locale => null`) and are RTL-aware. Publish translations with `--tag=larasaas-lang` and translate away.
+- Components follow your app's locale (`app()->getLocale()`) automatically and are RTL-aware. There is nothing to configure.
+
+### Translations: add or edit a language
+
+LaraSaaS ships **English, French and Arabic**. The text follows whatever locale your app sets (`App::setLocale()`, a middleware, a user setting…). Languages without a file fall back to your `app.fallback_locale`.
+
+**1. Publish the translation files**
+
+```bash
+php artisan vendor:publish --tag=larasaas-lang
+```
+
+This copies them to your project:
+
+```
+lang/vendor/larasaas/
+├── en/larasaas.php
+├── fr/larasaas.php
+└── ar/larasaas.php
+```
+
+**2. Add a language:** copy the English folder and translate the values (keep the keys):
+
+```bash
+cp -r lang/vendor/larasaas/en lang/vendor/larasaas/nl
+```
+
+```php
+// lang/vendor/larasaas/nl/larasaas.php
+'pricing' => [
+    'title' => 'Prijzen',   // was 'Pricing'
+    // ...
+],
+```
+
+**3. Done.** When your app's locale is `nl`, the React pages, embed pages and messages use your Dutch file. No config change is needed.
+
+To **change existing wording**, edit the published file of that language, e.g. `lang/vendor/larasaas/en/larasaas.php`. Your copy overrides the package's.
+
+**Right-to-left languages:** `ar`, `he`, `fa` and `ur` render RTL automatically, including region variants like `ar_SA`. Add more in `config/larasaas.php`:
+
+```php
+'rtl_locales' => ['ar', 'he', 'fa', 'ur', 'ps'],
+```
 
 ## Developing the package locally
 

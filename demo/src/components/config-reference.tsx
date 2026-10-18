@@ -110,8 +110,9 @@ Route::middleware('larasaas.subscribed')->group(function () {
     'accent'  => '#ff2d20',  // --larasaas-accent, yours to override
 ],
 
-'locales' => ['en', 'fr', 'ar'],
-'locale'  => null,           // null → app()->getLocale()
+// Text follows app()->getLocale(); add languages with
+// php artisan vendor:publish --tag=larasaas-lang
+'rtl_locales' => ['ar', 'he', 'fa', 'ur'],
 
 // custom accent from your own CSS:
 // :root { --larasaas-accent: #7c3aed; }

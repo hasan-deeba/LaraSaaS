@@ -23,12 +23,12 @@ class ShareLaraSaaSProps
             $user = $request->user();
 
             return [
-                'locale'       => config('larasaas.locale') ?: app()->getLocale(),
-                'dir'          => in_array(config('larasaas.locale') ?: app()->getLocale(), ['ar', 'he', 'fa']) ? 'rtl' : 'ltr',
+                'locale'       => app()->getLocale(),
+                'dir'          => $larasaas->textDirection(),
                 'translations' => trans('larasaas::larasaas'),
                 'accent'       => $larasaas->accentColor(),
                 'api_base'     => $larasaas->apiBase(),
-                'poll_seconds' => config('larasaas.announcements.poll_seconds', 60),
+                'poll_seconds' => (int) config('larasaas.announcements.poll_seconds', 60),
                 'authenticated' => $user !== null,
                 'login_url' => config('larasaas.login_url', '/login'),
                 'web_base' => '/' . trim(config('larasaas.route.prefix', 'app'), '/'),

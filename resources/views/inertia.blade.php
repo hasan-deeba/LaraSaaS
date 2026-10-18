@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <html lang="{{ str_replace('_', '-', app()->getLocale()) }}"
-      dir="{{ in_array(app()->getLocale(), ['ar', 'he', 'fa']) ? 'rtl' : 'ltr' }}"
+      dir="{{ \LaraSaaS\Facades\LaraSaaS::textDirection() }}"
       class="{{ config('larasaas.theme.default') === 'dark' ? 'dark' : (config('larasaas.theme.default') === 'light' ? 'light' : '') }}">
 <head>
     <meta charset="utf-8">
