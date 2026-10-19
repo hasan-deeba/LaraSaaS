@@ -115,6 +115,50 @@ class LaraSaaS
         return $this->userModel();
     }
 
+    /**
+     * Point Cashier at the SAME model LaraSaaS bills.
+     *
+     * Cashier resolves webhook customers through its own static customer model
+     * (`Cashier::findBillable()`), which defaults to a hardcoded
+     * `App\Models\User` — it never reads `larasaas.user_model`. Any host whose
+     * user model lives in another namespace (App\Models\AccessManagement\User,
+     * a domain folder, …) therefore got `class_parents(): Class App\Models\User
+     * does not exist` and a 500 on `customer.subscription.*` / `invoice.*`
+     * webhooks, while Checkout itself kept working.
+     *
+     * LaraSaaS owns this mapping: it is applied in the service provider's
+     * register() and boot(), so a host that still calls
+     * `Cashier::useCustomerModel(...)` in AppServiceProvider::boot() (which runs
+     * after every package provider) keeps the final say.
+     *
+     * @return bool true when Cashier was pointed at the LaraSaaS billable model
+     */
+    public function syncCashierCustomerModel(): bool
+    {
+        $class = $this->billableType();
+
+        if (! class_exists(\Laravel\Cashier\Cashier::class) || $class === '') {
+            return false;
+        }
+
+        \Laravel\Cashier\Cashier::useCustomerModel($class);
+
+        // Mirror it in the config repository too: Cashier 15/16 keeps no `model`
+        // key, but hosts and other packages look for one, and this survives
+        // `php artisan config:cache` for anything that reads it.
+        config(['cashier.model' => $class]);
+
+        return true;
+    }
+
+    /** The model Cashier currently resolves webhook customers with. */
+    public function cashierCustomerModel(): ?string
+    {
+        return class_exists(\Laravel\Cashier\Cashier::class)
+            ? (string) \Laravel\Cashier\Cashier::$customerModel
+            : null;
+    }
+
     /*
     |--------------------------------------------------------------------------
     | Multi-tenant Workspaces & Team Management

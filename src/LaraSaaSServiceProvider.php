@@ -19,10 +19,18 @@ class LaraSaaSServiceProvider extends ServiceProvider
 
         $this->app->singleton(LaraSaaS::class, fn () => new LaraSaaS);
         $this->app->alias(LaraSaaS::class, 'larasaas');
+
+        // Cashier's static customer model defaults to a hardcoded App\Models\User
+        // and is what every Stripe webhook lookup goes through. Point it at the
+        // configured billable BEFORE the host's providers boot, so a host with
+        // `Cashier::useCustomerModel(...)` in AppServiceProvider::boot() keeps
+        // the final say.
+        $this->app->make(LaraSaaS::class)->syncCashierCustomerModel();
     }
 
     public function boot(): void
     {
+        $this->registerCashierCustomerModel();
         $this->registerRoutes();
         $this->registerResources();
         $this->registerPublishing();
@@ -31,6 +39,18 @@ class LaraSaaSServiceProvider extends ServiceProvider
         $this->registerMiddleware();
         $this->registerCommands();
         $this->alertOnConfigDrift();
+    }
+
+    /**
+     * Second sync pass: hosts that set `larasaas.user_model` (or switch
+     * `billing.billable` to workspace) from their own provider register/boot
+     * configure it AFTER our register() ran. Anything the host sets later —
+     * `Cashier::useCustomerModel()` in AppServiceProvider::boot() — still wins,
+     * because every host provider boots after every package provider.
+     */
+    protected function registerCashierCustomerModel(): void
+    {
+        $this->app->make(LaraSaaS::class)->syncCashierCustomerModel();
     }
 
     protected function registerRoutes(): void
