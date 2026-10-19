@@ -17,6 +17,18 @@ return [
     | If you change this value AFTER migrating, run `php artisan larasaas:doctor`
     | — it alerts you about the drift between config and database.
     |
+    | LaraSaaS also points Laravel Cashier at this model for you
+    | (Cashier::useCustomerModel), so Stripe webhooks resolve customers with
+    | YOUR class instead of Cashier's hardcoded `App\Models\User` default.
+    | Without it, a namespaced user model such as
+    | App\Models\AccessManagement\User makes every `customer.subscription.*`
+    | and `invoice.*` webhook fail with
+    | "class_parents(): Class App\Models\User does not exist".
+    |
+    | Set it from .env with LARASAAS_USER_MODEL — unquoted or in 'single
+    | quotes'. NEVER in "double quotes": dotenv reads \M as an escape sequence
+    | and then refuses to load the entire .env file.
+    |
     */
 
     'user_model' => env('LARASAAS_USER_MODEL', 'App\\Models\\User'),
@@ -354,8 +366,12 @@ return [
 
         // Who pays: 'user' (each person) or 'workspace' (the whole company).
         // ⚠ Set BEFORE `migrate`: the Stripe columns go on that model's table.
-        // The model must `use Laravel\Cashier\Billable`. For 'workspace' also add
-        //   Cashier::useCustomerModel(Workspace::class);  // in AppServiceProvider
+        // The model must `use Laravel\Cashier\Billable`.
+        // Cashier is pointed at this model automatically (see `user_model`
+        // above) — you do NOT need Cashier::useCustomerModel() anymore. Call it
+        // yourself only to bill a model LaraSaaS does not know about, from
+        // AppServiceProvider::boot(): host providers boot after package
+        // providers, so your call has the final say.
         'billable' => env('LARASAAS_BILLABLE', 'user'),
 
         // Paying workspace class. Leave null to reuse multi_tenant.workspace_model.

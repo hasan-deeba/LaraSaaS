@@ -245,12 +245,16 @@ class InstallTest extends TestCase
 
 class InstallUser extends User
 {
+    use \Laravel\Cashier\Billable;
+
     protected $table = 'users';
     protected $guarded = [];
 }
 
 class MembersUser extends User
 {
+    use \Laravel\Cashier\Billable;
+
     protected $table = 'members';
     protected $guarded = [];
 }

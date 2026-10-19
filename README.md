@@ -98,6 +98,18 @@ class User extends Authenticatable
 }
 ```
 
+**Your User model lives somewhere else** (`App\Models\AccessManagement\User`, a domain folder, …)? Point LaraSaaS at it:
+
+```env
+# Unquoted or 'single quotes' — NEVER "double quotes": dotenv reads \M as an
+# escape sequence and refuses to load the whole .env file.
+LARASAAS_USER_MODEL=App\Models\AccessManagement\User
+```
+
+Then clear the config cache: `php artisan config:clear`.
+
+LaraSaaS points Cashier at that class too (`Cashier::useCustomerModel`), so Stripe webhooks resolve customers with **your** model instead of Cashier's hardcoded `App\Models\User` default. Without it, Checkout still works but `customer.subscription.*` and `invoice.*` webhooks answer 500 with `class_parents(): Class App\Models\User does not exist` — and no subscription row is ever written.
+
 ### 4. Add your Stripe keys to `.env`
 
 ```env
@@ -418,8 +430,10 @@ LARASAAS_WORKSPACE_MODEL=App\Models\Workspace
 LARASAAS_BILLABLE=workspace
 ```
 
+That is all: LaraSaaS points Cashier at the paying workspace itself. Only add the call below if you bill a model LaraSaaS does not know about. Put it in `AppServiceProvider::boot()` — host providers boot after package providers, so your call has the final say:
+
 ```php
-// AppServiceProvider::boot()
+// AppServiceProvider::boot() — optional
 \Laravel\Cashier\Cashier::useCustomerModel(\App\Models\Workspace::class);
 ```
 
@@ -563,6 +577,10 @@ LARASAAS_ADMIN_EMAILS=you@yourapp.com
 LARASAAS_PREFIX=app
 LARASAAS_API_CORS_ORIGINS=
 LARASAAS_EMBED_FRAME_ANCESTORS=*
+
+# Only when your model is not App\Models\User. Unquoted or 'single quotes' —
+# "double quotes" make dotenv fail on the \M escape sequence.
+LARASAAS_USER_MODEL=App\Models\AccessManagement\User
 ```
 
 ---
@@ -584,6 +602,9 @@ Install it for the PHP version Composer uses: `sudo apt install php-bcmath` (Deb
 
 **"model must use the Laravel\Cashier\Billable trait"**
 Add `use Billable;` to the model that pays: the User, or your Workspace with `LARASAAS_BILLABLE=workspace`.
+
+**Webhooks return 500: `class_parents(): Class App\Models\User does not exist`**
+Cashier looks webhook customers up with its own static customer model, which defaults to a hardcoded `App\Models\User` — Checkout works, but `customer.subscription.*` and `invoice.*` events crash, so no subscription row is written. Set `LARASAAS_USER_MODEL=App\Models\...` (or `LARASAAS_BILLABLE=workspace` + `LARASAAS_WORKSPACE_MODEL`) to your real model and run `php artisan config:clear`; LaraSaaS points Cashier at it on boot. Still failing? Something else sets it — check `Cashier::useCustomerModel(...)` in `AppServiceProvider::boot()`, and run `php artisan larasaas:doctor`, which reports any mismatch. Because the webhook answers 500, Stripe keeps retrying the event: in production it replays by itself once the model resolves. With `stripe listen` the retries do not reach your machine — resend the event from **Developers → Events** in test mode, or simply cancel and re-subscribe.
 
 **Admin pages return 403**
 Set `LARASAAS_ADMIN_EMAILS` or redefine the `larasaas-admin` Gate. See [Admin panels](#admin-panels).

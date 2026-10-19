@@ -75,6 +75,13 @@ class InstallCommand extends Command
         if (class_exists(\Laravel\Cashier\Cashier::class)) {
             $this->callSilently('vendor:publish', ['--tag' => 'cashier-migrations']);
             $this->components->twoColumnDetail('Published [cashier-migrations]', '<fg=green>DONE</>');
+
+            // Cashier resolves webhook customers with its own static model, so
+            // show the developer exactly which class Stripe events will land on.
+            $this->components->twoColumnDetail(
+                'Cashier customer model',
+                '<fg=cyan>' . app(\LaraSaaS\LaraSaaS::class)->cashierCustomerModel() . '</> (from larasaas config)',
+            );
         }
 
         $this->guardCashierCustomerColumns();
@@ -97,6 +104,7 @@ class InstallCommand extends Command
         $this->line('  3. Point Stripe webhooks at <comment>/larasaas/webhooks/stripe</comment> and exclude it from CSRF');
 
         $this->line('  4. Add <comment>Laravel\\Cashier\\Billable</comment> to your billable model (user, or workspace for workspace billing; see README Cashier setup)');
+        $this->line('     Model not at <comment>App\\Models\\User</comment>? Set <comment>LARASAAS_USER_MODEL=App\\Models\\…</comment> (unquoted!) — LaraSaaS points Cashier at it, so Stripe webhooks find your customers');
 
         if ($multiTenant) {
             $this->line('  5. Create workspaces with <comment>LaraSaaS::createWorkspace()</comment> and manage teams via <comment>/app/workspaces</comment> (or the JSON API)');

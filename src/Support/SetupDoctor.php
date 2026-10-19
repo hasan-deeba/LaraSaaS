@@ -26,6 +26,7 @@ class SetupDoctor
             $this->modelChecks(),
             $this->driftChecks(),
             $this->columnChecks(),
+            $this->cashierChecks(),
             $this->multiTenantChecks(),
         );
     }
@@ -69,6 +70,10 @@ class SetupDoctor
     /** Compare the configuration against what the migrations recorded. */
     protected function driftChecks(): array
     {
+        if (! $this->hasDatabase()) {
+            return [];
+        }
+
         if (! Schema::hasTable('larasaas_settings')) {
             return [[
                 'check' => 'migrations',
@@ -135,6 +140,10 @@ class SetupDoctor
     /** Are the Cashier customer columns present on the configured billable table? */
     protected function columnChecks(): array
     {
+        if (! $this->hasDatabase()) {
+            return [];
+        }
+
         $billableTable = $this->billableTable();
 
         if ($billableTable === null) {
@@ -176,10 +185,93 @@ class SetupDoctor
         ]];
     }
 
+    /**
+     * Cashier resolves Stripe webhook customers with its OWN static customer
+     * model (`Cashier::$customerModel`, default `App\Models\User`) — it never
+     * reads `larasaas.user_model`. LaraSaaS syncs the two on boot; these checks
+     * report the cases where that is not enough: a host override pointing
+     * somewhere else, or a billable model missing Cashier's `Billable` trait.
+     *
+     * @return array<int, array{check: string, ok: bool, level: string, message: string}>
+     */
+    protected function cashierChecks(): array
+    {
+        if (! class_exists(\Laravel\Cashier\Cashier::class)) {
+            return [];
+        }
+
+        $checks = [];
+        $billableType = $this->billableClass();
+        $cashierModel = (string) \Laravel\Cashier\Cashier::$customerModel;
+
+        if ($billableType === null) {
+            $checks[] = [
+                'check' => 'cashier_billable',
+                'ok' => false,
+                'level' => 'error',
+                'message' => 'The configured billable model cannot be resolved, so Cashier has nothing to sync. '
+                    . 'Fix larasaas.user_model (or larasaas.billing.workspace_model when billing.billable is "workspace") first.',
+            ];
+
+            return $checks;
+        }
+
+        if (! in_array(\Laravel\Cashier\Billable::class, class_uses_recursive($billableType), true)) {
+            $checks[] = [
+                'check' => 'cashier_billable_trait',
+                'ok' => false,
+                'level' => 'warning',
+                'message' => "The billable model [{$billableType}] does not use the Laravel\\Cashier\\Billable trait. "
+                    . 'Checkout, subscriptions and webhooks all need it — add `use Laravel\\Cashier\\Billable;` to that model.',
+            ];
+        } else {
+            $checks[] = [
+                'check' => 'cashier_billable_trait',
+                'ok' => true,
+                'level' => 'info',
+                'message' => "Billable model [{$billableType}] uses the Laravel\\Cashier\\Billable trait.",
+            ];
+        }
+
+        if ($cashierModel === $billableType) {
+            $checks[] = [
+                'check' => 'cashier_customer_model',
+                'ok' => true,
+                'level' => 'info',
+                'message' => "Cashier resolves webhook customers with [{$cashierModel}], matching the configured billable.",
+            ];
+
+            return $checks;
+        }
+
+        $checks[] = [
+            'check' => 'cashier_customer_model',
+            'ok' => false,
+            'level' => class_exists($cashierModel) ? 'warning' : 'error',
+            'message' => sprintf(
+                'Cashier resolves Stripe webhook customers with [%s], but LaraSaaS bills [%s]. '
+                . '%s LaraSaaS points Cashier at your billable automatically unless something else sets it — '
+                . 'check for Cashier::useCustomerModel(...) in AppServiceProvider and align it, then re-run this command.',
+                $cashierModel !== '' ? $cashierModel : 'unset',
+                $billableType,
+                class_exists($cashierModel)
+                    ? 'Webhooks would sync subscriptions onto the WRONG model.'
+                    : 'Every webhook that looks up a customer fails with a class-loading error (HTTP 500).',
+            ),
+        ];
+
+        return $checks;
+    }
+
     /** @return array<int, array{check: string, ok: bool, level: string, message: string}> */
     protected function multiTenantChecks(): array
     {
         $enabled = (bool) config('larasaas.multi_tenant.enabled');
+
+        if (! $this->hasDatabase()) {
+            return [];
+        }
+
         $hasSchema = Schema::hasTable('larasaas_workspaces');
 
         if ($enabled && ! $hasSchema) {
@@ -215,6 +307,17 @@ class SetupDoctor
     /** The configured billable model's table — null when it cannot be resolved yet. */
     protected function billableTable(): ?string
     {
+        $class = $this->billableClass();
+
+        return $class === null ? null : (new $class)->getTable();
+    }
+
+    /**
+     * The class LaraSaaS bills (and therefore the class Cashier must resolve
+     * webhook customers with) — null when it is not a loadable class yet.
+     */
+    protected function billableClass(): ?string
+    {
         $workspaceBilling = config('larasaas.billing.billable', 'user') === 'workspace';
 
         $class = $workspaceBilling
@@ -225,7 +328,19 @@ class SetupDoctor
             return null;
         }
 
-        return (new $class)->getTable();
+        return $class;
+    }
+
+    /**
+     * Is a database connection configured at all? Schema checks throw a
+     * QueryException without one (e.g. a bare testbench app still on the
+     * `mysql` default), and the model/Cashier checks stay useful regardless.
+     */
+    protected function hasDatabase(): bool
+    {
+        $default = config('database.default');
+
+        return is_string($default) && $default !== '' && is_array(config("database.connections.{$default}"));
     }
 
     /** @return array<string, mixed> */

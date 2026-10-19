@@ -2,6 +2,19 @@
 
 All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
+## Unreleased
+
+### Fixed
+
+- **Stripe webhooks now resolve the host's own billable model.** Cashier looks webhook customers up through its own static customer model (`Cashier::findBillable()`), which defaults to a hardcoded `App\Models\User` and never reads `larasaas.user_model`. Hosts with a namespaced user model (e.g. `App\Models\AccessManagement\User`) got `class_parents(): Class App\Models\User does not exist` and HTTP 500 on `customer.subscription.*` and `invoice.*` events, while Checkout itself kept working — so subscriptions were never written to the database. LaraSaaS now calls `Cashier::useCustomerModel()` with the configured billable (user model, or the workspace model when `billing.billable` is `workspace`) on register and again on boot, so `Cashier::useCustomerModel(...)` in `AppServiceProvider::boot()` is no longer required — including for workspace billing. A host that still calls it there keeps the final say, because host providers boot after package providers.
+
+### Added
+
+- `LaraSaaS::syncCashierCustomerModel()` and `LaraSaaS::cashierCustomerModel()` to inspect/repair the mapping at runtime.
+- The Stripe webhook controller guards every billable lookup: an unloadable customer model now produces ONE actionable log line (and a 500 so Stripe retries the event) instead of a PHP class-loading error.
+- `larasaas:doctor` reports the Cashier customer model, a missing `Laravel\Cashier\Billable` trait on the billable, and any mismatch between the two. Its schema checks now stay silent when no database connection is configured instead of throwing a `QueryException`.
+- `larasaas:install` prints the Cashier customer model it configured.
+
 ## 1.0.0 — 2026-10-18
 
 First stable release.
