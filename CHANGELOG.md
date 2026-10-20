@@ -6,6 +6,13 @@ All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
 ### Fixed
 
+- **Hardened signed embed URLs and fixed standalone embed billing/pricing bugs:**
+    - Rejects signed embed URLs with `403` when the browser already holds an active session for a *different* user, preventing cross-account viewing or subscription changes via shared links while preserving cookie-less cross-origin `<iframe>` and WebView embeds.
+    - Preserves the incoming `expires` timestamp across all rendered embed navigation and post-action redirects instead of minting fresh `token_ttl` windows on every page load, preventing leaked links from being refreshed indefinitely.
+    - Binds signed embed URLs to an HMAC fingerprint of the user's loaded password hash (`ph`), immediately invalidating previously issued embed links when a user resets or changes their password.
+    - Generates Stripe Checkout and Customer Portal `return_url`s strictly server-side in `EmbedController` (ignoring untrusted POST `success_url` / `cancel_url` parameters and removing hidden 24-hour signed URLs from HTML), fixing a `404` return-from-portal bug in standalone `embed` mode.
+    - Sends `Referrer-Policy: no-referrer` (header + `<meta name="referrer">`) on embed responses so query signatures are never leaked in `Referer` headers.
+    - Fixed embed `/embed/pricing` interval detection (`current_price_id` match) so active subscribers can switch between `monthly` and `yearly` intervals on their current plan in-frame (without breaking out to `target="_top"` or showing misleading free-trial copy).
 - **Stripe webhooks now resolve the host's own billable model.** Cashier looks webhook customers up through its own static customer model (`Cashier::findBillable()`), which defaults to a hardcoded `App\Models\User` and never reads `larasaas.user_model`. Hosts with a namespaced user model (e.g. `App\Models\AccessManagement\User`) got `class_parents(): Class App\Models\User does not exist` and HTTP 500 on `customer.subscription.*` and `invoice.*` events, while Checkout itself kept working — so subscriptions were never written to the database. LaraSaaS now calls `Cashier::useCustomerModel()` with the configured billable (user model, or the workspace model when `billing.billable` is `workspace`) on register and again on boot, so `Cashier::useCustomerModel(...)` in `AppServiceProvider::boot()` is no longer required — including for workspace billing. A host that still calls it there keeps the final say, because host providers boot after package providers.
 
 ### Added

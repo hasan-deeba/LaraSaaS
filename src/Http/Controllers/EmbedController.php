@@ -4,6 +4,7 @@ namespace LaraSaaS\Http\Controllers;
 
 use Illuminate\Http\Request;
 use Illuminate\Routing\Controller;
+use Illuminate\Support\Carbon;
 use Illuminate\Validation\Rule;
 use LaraSaaS\LaraSaaS;
 use LaraSaaS\Support\BillingActions;
@@ -39,16 +40,15 @@ class EmbedController extends Controller
             'subscription' => $this->larasaas->subscriptionForUi($request),
             'notice'       => $this->notice($request),
             'nav'          => [
-                'pricing' => $this->larasaas->embedUrl($user, 'pricing', ['interval' => $interval]),
-                'billing' => $user ? $this->larasaas->embedUrl($user, 'billing') : null,
+                'pricing' => $this->embedLink($request, $user, 'pricing', ['interval' => $interval]),
+                'billing' => $user ? $this->embedLink($request, $user, 'billing') : null,
             ],
             'intervals'    => collect(config('larasaas.pricing.intervals', ['monthly', 'yearly']))
-                ->mapWithKeys(fn (string $i) => [$i => $this->larasaas->embedUrl($user, 'pricing', ['interval' => $i])])
+                ->mapWithKeys(fn (string $i) => [$i => $this->embedLink($request, $user, 'pricing', ['interval' => $i])])
                 ->all(),
             'subscribe'    => collect($user ? $this->larasaas->planKeys() : [])
-                ->mapWithKeys(fn (string $key) => [$key => $this->larasaas->embedUrl($user, 'billing.subscribe', ['plan' => $key])])
+                ->mapWithKeys(fn (string $key) => [$key => $this->embedLink($request, $user, 'billing.subscribe', ['plan' => $key])])
                 ->all(),
-            'returns'      => $user ? $this->returnUrls($user, $interval) : [],
         ]);
     }
 
@@ -63,24 +63,23 @@ class EmbedController extends Controller
             'invoices'     => $this->billing->invoices($request),
             'notice'       => $this->notice($request),
             'nav'          => [
-                'pricing' => $this->larasaas->embedUrl($user, 'pricing'),
-                'billing' => $user ? $this->larasaas->embedUrl($user, 'billing') : null,
+                'pricing' => $this->embedLink($request, $user, 'pricing'),
+                'billing' => $user ? $this->embedLink($request, $user, 'billing') : null,
             ],
             'actions'      => [
-                'portal' => $this->larasaas->embedUrl($user, 'billing.portal'),
-                'cancel' => $this->larasaas->embedUrl($user, 'billing.cancel'),
-                'resume' => $this->larasaas->embedUrl($user, 'billing.resume'),
+                'portal' => $this->embedLink($request, $user, 'billing.portal'),
+                'cancel' => $this->embedLink($request, $user, 'billing.cancel'),
+                'resume' => $this->embedLink($request, $user, 'billing.resume'),
             ],
             'subscribe'    => collect($user ? $this->larasaas->planKeys() : [])
-                ->mapWithKeys(fn (string $key) => [$key => $this->larasaas->embedUrl($user, 'billing.subscribe', ['plan' => $key])])
+                ->mapWithKeys(fn (string $key) => [$key => $this->embedLink($request, $user, 'billing.subscribe', ['plan' => $key])])
                 ->all(),
-            'returns'      => $this->returnUrls($user),
         ]);
     }
 
     /**
      * Subscribe / switch plan → Stripe Checkout opens in the top-level
-     * window (forms post with target="_top").
+     * window (forms post with target="_top"); plan swaps stay in-frame.
      */
     public function subscribe(Request $request, string $plan): Response
     {
@@ -88,6 +87,12 @@ class EmbedController extends Controller
 
         ['interval' => $interval] = $request->validate([
             'interval' => ['required', Rule::in(config('larasaas.pricing.intervals', ['monthly', 'yearly']))],
+        ]);
+
+        $returns = $this->returnUrls($request->user(), $interval);
+        $request->merge([
+            'success_url' => $returns['success'],
+            'cancel_url'  => $returns['canceled'],
         ]);
 
         $result = $this->billing->subscribe($request, $plan, $interval);
@@ -116,25 +121,42 @@ class EmbedController extends Controller
     /** Stripe's hosted customer portal — opens in the top-level window. */
     public function portal(Request $request): Response
     {
+        $request->merge([
+            'success_url' => $this->larasaas->embedUrl($request->user(), 'billing'),
+        ]);
+
         return redirect()->away($this->billing->portalUrl($request));
     }
 
     protected function backToBilling(Request $request, string $notice): Response
     {
-        return redirect()->to($this->larasaas->embedUrl($request->user(), 'billing', ['notice' => $notice]));
+        return redirect()->to($this->embedLink($request, $request->user(), 'billing', ['notice' => $notice]));
     }
 
     /**
-     * Where Stripe sends the user back after Checkout / the customer
-     * portal. Signed with a generous TTL — customers can take a while
-     * inside Stripe — and used verbatim so the signature stays valid.
+     * Preserve an incoming signed link's `expires` ceiling across navigation
+     * and redirects so refreshing never extends a leaked token's lifetime.
+     */
+    protected function embedLink(Request $request, $user, string $page = 'pricing', array $params = []): string
+    {
+        return $this->larasaas->embedUrl($user, $page, $params, $this->currentExpiry($request));
+    }
+
+    protected function currentExpiry(Request $request): ?\DateTimeInterface
+    {
+        $expires = $request->query('expires');
+
+        return is_numeric($expires) ? Carbon::createFromTimestamp((int) $expires) : null;
+    }
+
+    /**
+     * Where Stripe sends the user back after Checkout — generated server-side
+     * only (never exposed in HTML or accepted from untrusted form input).
      *
      * @return array{success: string, canceled: string}
      */
     protected function returnUrls($user, ?string $interval = null): array
     {
-        $minutes = 24 * 60;
-
         $canceled = ['notice' => 'canceled'];
 
         if ($interval !== null) {
@@ -142,8 +164,8 @@ class EmbedController extends Controller
         }
 
         return [
-            'success'  => $this->larasaas->embedUrl($user, 'billing', ['notice' => 'success'], $minutes),
-            'canceled' => $this->larasaas->embedUrl($user, 'pricing', $canceled, $minutes),
+            'success'  => $this->larasaas->embedUrl($user, 'billing', ['notice' => 'success']),
+            'canceled' => $this->larasaas->embedUrl($user, 'pricing', $canceled),
         ];
     }
 

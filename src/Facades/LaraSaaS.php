@@ -34,7 +34,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool servesApi()
  * @method static bool servesEmbed()
  * @method static string embedRouteName(string $page)
- * @method static string embedUrl($user = null, string $page = 'pricing', array $params = [], ?int $minutes = null)
+ * @method static string embedUrl($user = null, string $page = 'pricing', array $params = [], \DateTimeInterface|int|null $minutes = null)
+ * @method static ?string embedCredentialHash($user)
  *
  * @see \LaraSaaS\LaraSaaS
  */

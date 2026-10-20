@@ -29,8 +29,9 @@ class EmbedFrameHeaders
             );
         }
 
-        // Never cache authenticated billing pages.
+        // Never cache authenticated billing pages, or leak signed tokens via Referer.
         $response->headers->set('Cache-Control', 'no-store, private');
+        $response->headers->set('Referrer-Policy', 'no-referrer');
 
         return $response;
     }
