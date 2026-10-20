@@ -9,6 +9,7 @@ use Illuminate\Validation\Rule;
 use LaraSaaS\LaraSaaS;
 use LaraSaaS\Support\BillingActions;
 use Symfony\Component\HttpFoundation\Response;
+use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 /**
  * Standalone, frameable UI (`integration.mode = embed|all`) — server-rendered
@@ -19,12 +20,15 @@ use Symfony\Component\HttpFoundation\Response;
 class EmbedController extends Controller
 {
     public const NOTICES = [
-        'success'      => 'billing.success',
-        'canceled'     => 'billing.checkout_canceled',
-        'swapped'      => 'billing.swapped',
-        'canceled_sub' => 'billing.canceled',
-        'resumed'      => 'billing.resumed',
+        'success'        => 'billing.success',
+        'canceled'       => 'billing.checkout_canceled',
+        'swapped'        => 'billing.swapped',
+        'canceled_sub'   => 'billing.canceled',
+        'resumed'        => 'billing.resumed',
+        'payment_failed' => 'billing.payment_failed',
     ];
+
+    public const WARN_NOTICES = ['canceled', 'payment_failed'];
 
     public function __construct(protected LaraSaaS $larasaas, protected BillingActions $billing) {}
 
@@ -39,6 +43,7 @@ class EmbedController extends Controller
             'pricing'      => $this->larasaas->pricingForUi(),
             'subscription' => $this->larasaas->subscriptionForUi($request),
             'notice'       => $this->notice($request),
+            'notice_tone'  => $this->noticeTone($request),
             'nav'          => [
                 'pricing' => $this->embedLink($request, $user, 'pricing', ['interval' => $interval]),
                 'billing' => $user ? $this->embedLink($request, $user, 'billing') : null,
@@ -62,6 +67,7 @@ class EmbedController extends Controller
             'pricing'      => $this->larasaas->pricingForUi(),
             'invoices'     => $this->billing->invoices($request),
             'notice'       => $this->notice($request),
+            'notice_tone'  => $this->noticeTone($request),
             'nav'          => [
                 'pricing' => $this->embedLink($request, $user, 'pricing'),
                 'billing' => $user ? $this->embedLink($request, $user, 'billing') : null,
@@ -95,7 +101,15 @@ class EmbedController extends Controller
             'cancel_url'  => $returns['canceled'],
         ]);
 
-        $result = $this->billing->subscribe($request, $plan, $interval);
+        try {
+            $result = $this->billing->subscribe($request, $plan, $interval);
+        } catch (HttpExceptionInterface $e) {
+            if ($e->getStatusCode() === 402) {
+                return $this->backToBilling($request, 'payment_failed');
+            }
+
+            throw $e;
+        }
 
         if ($result['action'] === 'checkout') {
             return redirect()->away($result['url']);
@@ -186,5 +200,12 @@ class EmbedController extends Controller
         return is_string($key) && isset(self::NOTICES[$key])
             ? __('larasaas::larasaas.' . self::NOTICES[$key])
             : null;
+    }
+
+    protected function noticeTone(Request $request): string
+    {
+        $key = $request->query('notice');
+
+        return is_string($key) && in_array($key, self::WARN_NOTICES, true) ? 'warn' : 'ok';
     }
 }

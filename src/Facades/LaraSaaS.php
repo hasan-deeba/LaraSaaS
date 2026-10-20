@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static array pricingForUi()
  * @method static array subscriptionForUi(\Illuminate\Http\Request $request)
  * @method static string|null planKeyForPrice(?string $priceId)
+ * @method static array|null priceDetails(?string $priceId)
  * @method static array announcementTypes()
  * @method static array announcementType(string $type)
  * @method static string textDirection(?string $locale = null)

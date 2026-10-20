@@ -6,6 +6,10 @@ All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
 ### Fixed
 
+- **Plan swaps now invoice and collect payment immediately (`swapAndInvoice` + `errorIfPaymentFails`), ending free trials on upgrades:**
+    - Replaced Cashier's deferred `swap()` with `errorIfPaymentFails()->swapAndInvoice()` so switching plans immediately invoices and charges any prorated difference instead of leaving unbilled proration items until the next renewal cycle, and atomically aborts the plan change in Stripe when the saved payment method fails or is missing.
+    - When a subscriber is inside a free trial, upgrading to a higher-cost plan or billing cycle (including higher effective monthly rate, e.g. cheap yearly → expensive monthly) or switching to a plan with `trial_days = 0` calls `skipTrial()` before invoicing so trial users cannot switch onto expensive plans without paying immediately, while pure downgrades to plans offering trials preserve the remaining trial period.
+    - Added graceful `402` payment-failure handling across Embed (`payment_failed` warning notice on `/embed/billing`), Inertia (`larasaas.notice`), and JSON API (`402`), with `en` / `fr` / `ar` translations.
 - **Hardened signed embed URLs and fixed standalone embed billing/pricing bugs:**
     - Rejects signed embed URLs with `403` when the browser already holds an active session for a *different* user, preventing cross-account viewing or subscription changes via shared links while preserving cookie-less cross-origin `<iframe>` and WebView embeds.
     - Preserves the incoming `expires` timestamp across all rendered embed navigation and post-action redirects instead of minting fresh `token_ttl` windows on every page load, preventing leaked links from being refreshed indefinitely.

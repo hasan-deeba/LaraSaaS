@@ -356,6 +356,16 @@ class LaraSaaS
 
     public function planKeyForPrice(?string $priceId): ?string
     {
+        return $this->priceDetails($priceId)['key'] ?? null;
+    }
+
+    /**
+     * Resolve catalog plan metadata (including archived plans) for a Stripe price ID.
+     *
+     * @return array{key: string, interval: string, price: float|int|null, plan: array}|null
+     */
+    public function priceDetails(?string $priceId): ?array
+    {
         if (! $priceId) {
             return null;
         }
@@ -366,7 +376,12 @@ class LaraSaaS
             $plan = $record->forPricing();
             foreach (['monthly', 'yearly'] as $interval) {
                 if (($plan[$interval]['stripe_id'] ?? null) === $priceId) {
-                    return $key;
+                    return [
+                        'key'      => $key,
+                        'interval' => $interval,
+                        'price'    => $plan[$interval]['price'] ?? null,
+                        'plan'     => $plan,
+                    ];
                 }
             }
         }

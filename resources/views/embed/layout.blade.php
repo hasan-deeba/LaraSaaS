@@ -61,6 +61,10 @@
             border: 1px solid color-mix(in srgb, var(--ls-ok) 35%, transparent);
             color: var(--ls-text); font-weight: 500;
         }
+        .ls-notice.is-warn {
+            background: color-mix(in srgb, var(--ls-warn) 12%, transparent);
+            border-color: color-mix(in srgb, var(--ls-warn) 38%, transparent);
+        }
         .ls-hero { text-align: center; margin: 8px auto 26px; max-width: 640px; }
         .ls-hero h1 { margin: 0 0 8px; font-size: 28px; letter-spacing: -.02em; }
         .ls-hero p { margin: 0; color: var(--ls-muted); font-size: 15.5px; }
@@ -166,7 +170,7 @@
     </header>
 
     @if (! empty($notice))
-        <div class="ls-notice">{{ $notice }}</div>
+        <div class="ls-notice {{ ($notice_tone ?? 'ok') === 'warn' ? 'is-warn' : '' }}">{{ $notice }}</div>
     @endif
 
     <main>
