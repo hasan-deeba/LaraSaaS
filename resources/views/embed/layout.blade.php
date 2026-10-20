@@ -47,12 +47,6 @@
             display: flex; align-items: center; justify-content: space-between;
             gap: 12px; padding: 6px 2px 18px;
         }
-        .ls-brand { display: flex; align-items: center; gap: 10px; font-weight: 700; font-size: 16px; }
-        .ls-brand .ls-dot {
-            width: 26px; height: 26px; border-radius: 8px;
-            background: linear-gradient(135deg, var(--ls-accent), color-mix(in srgb, var(--ls-accent) 55%, #000));
-            display: inline-flex; align-items: center; justify-content: center; color: #fff; font-size: 13px;
-        }
         .ls-nav { display: flex; gap: 4px; }
         .ls-nav a {
             color: var(--ls-muted); text-decoration: none; font-weight: 500;
@@ -154,19 +148,12 @@
         .ls-table td { padding: 10px; border-bottom: 1px solid var(--ls-border); }
         .ls-table tr:last-child td { border-bottom: 0; }
         .ls-table a { color: var(--ls-accent); font-weight: 600; text-decoration: none; }
-        .ls-footer {
-            margin-top: 30px; text-align: center; color: var(--ls-muted); font-size: 12.5px;
-        }
         .ls-muted { color: var(--ls-muted); }
     </style>
 </head>
 <body>
 <div class="ls-shell">
     <header class="ls-header">
-        <div class="ls-brand">
-            <span class="ls-dot">◆</span>
-            <span>{{ config('app.name', 'Laravel') }}</span>
-        </div>
         @if (! empty($nav))
             <nav class="ls-nav">
                 <a href="{{ $nav['pricing'] ?? '#' }}" class="{{ request()->routeIs('larasaas.embed.pricing') ? 'is-active' : '' }}">{{ __('larasaas::larasaas.pricing.title') }}</a>
@@ -184,10 +171,6 @@
     <main>
         @yield('content')
     </main>
-
-    <footer class="ls-footer">
-        {{ __('larasaas::larasaas.embed.powered_by', ['app' => config('app.name', 'Laravel')]) }}
-    </footer>
 </div>
 </body>
 </html>

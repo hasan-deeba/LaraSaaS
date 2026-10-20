@@ -63,7 +63,8 @@ class PlansTest extends TestCase
             ->assertJsonPath('data.plans.starter.entitlements.storage_gb', 10)
             ->assertJsonPath('authenticated', false)
             ->assertJsonPath('subscription.subscribed', false);
-        $this->get('/embed/pricing')->assertOk()->assertSee('Starter')->assertSee('Sign in to choose a plan')->assertDontSee('/embed/billing');
+        $this->get('/embed/pricing')->assertOk()->assertSee('Starter')->assertSee('Sign in to choose a plan')->assertDontSee('/embed/billing')
+            ->assertDontSee('Secured by Laravel')->assertDontSee('ls-dot');
         $this->get('/app/pricing', ['X-Inertia' => 'true'])->assertOk()->assertJsonPath('component', 'LaraSaaS/Pricing');
     }
 
@@ -150,7 +151,10 @@ class PlansTest extends TestCase
         $manager = app(LaraSaaS::class);
         $this->get($manager->embedUrl())->assertOk();
         $signed = $manager->embedUrl($user);
-        $this->get($signed)->assertOk()->assertSee('/embed/billing');
+        $this->get($signed)->assertOk()->assertSee('/embed/billing')
+            ->assertDontSee('Secured by Laravel')->assertDontSee('ls-dot');
+        $this->get($manager->embedUrl($user, 'billing'))->assertOk()
+            ->assertDontSee('Secured by Laravel')->assertDontSee('ls-dot');
         $this->get('/embed/pricing?user=' . $user->id)->assertForbidden();
         $this->get($signed . '&extra=tampered')->assertForbidden();
         $expired = \Illuminate\Support\Facades\URL::temporarySignedRoute('larasaas.embed.pricing', now()->subMinute(), ['user' => $user->id]);
