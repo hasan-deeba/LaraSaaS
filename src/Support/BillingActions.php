@@ -71,7 +71,12 @@ class BillingActions
         return $billable->subscriptions()->where('type', $name)->exists();
     }
 
-    /** Swap between plans / intervals (prorated by Cashier). */
+    /**
+     * Swap between plans / intervals: immediately invoices and collects payment
+     * (`always_invoice` + `error_if_incomplete`) so unpaid upgrades can never
+     * activate, and ends any free trial when upgrading or switching to a
+     * non-trial plan.
+     */
     public function swap(Request $request, string $plan, string $interval): void
     {
         $planConfig = $this->larasaas->plan($plan) ?? abort(404);
@@ -83,7 +88,65 @@ class BillingActions
 
         abort_unless($billable->subscribed($name), 403);
 
-        $billable->subscription($name)->swap($planConfig[$interval]['stripe_id']);
+        $subscription = $billable->subscription($name);
+        $targetPrice  = $planConfig[$interval]['stripe_id'];
+
+        if (! $subscription->onGracePeriod() && $subscription->stripe_price === $targetPrice) {
+            return;
+        }
+
+        if ($subscription->onTrial() && $this->shouldEndTrialOnSwap($subscription->stripe_price, $planConfig, $interval)) {
+            $subscription->skipTrial();
+        }
+
+        try {
+            $subscription->errorIfPaymentFails()->swapAndInvoice($targetPrice);
+        } catch (\Throwable $e) {
+            if ($this->isSwapPaymentFailure($e)) {
+                abort(402, __('larasaas::larasaas.billing.payment_failed'));
+            }
+
+            throw $e;
+        }
+    }
+
+    /**
+     * End an active free trial whenever switching to a higher-cost plan/cycle
+     * or to a plan that does not offer a trial — never allow cheap-trial →
+     * expensive-plan upgrades without immediate payment.
+     */
+    protected function shouldEndTrialOnSwap(?string $currentPriceId, array $targetPlan, string $targetInterval): bool
+    {
+        $targetTrialDays = (int) ($targetPlan['trial_days'] ?? config('larasaas.billing.trial_days'));
+
+        if ($targetTrialDays <= 0) {
+            return true;
+        }
+
+        $current     = $this->larasaas->priceDetails($currentPriceId);
+        $targetPrice = $targetPlan[$targetInterval]['price'] ?? null;
+
+        if ($current === null || ! is_numeric($current['price'] ?? null) || ! is_numeric($targetPrice)) {
+            return true;
+        }
+
+        $currentAmount  = (float) $current['price'];
+        $targetAmount   = (float) $targetPrice;
+        $currentMonthly = $current['interval'] === 'yearly' ? $currentAmount / 12 : $currentAmount;
+        $targetMonthly  = $targetInterval === 'yearly' ? $targetAmount / 12 : $targetAmount;
+
+        return $targetAmount > $currentAmount || $targetMonthly > $currentMonthly;
+    }
+
+    protected function isSwapPaymentFailure(\Throwable $e): bool
+    {
+        if ($e instanceof \Laravel\Cashier\Exceptions\IncompletePayment
+            || $e instanceof \Stripe\Exception\CardException) {
+            return true;
+        }
+
+        return $e instanceof \Stripe\Exception\InvalidRequestException
+            && str_contains(strtolower($e->getMessage()), 'payment');
     }
 
     public function cancel(Request $request): void
