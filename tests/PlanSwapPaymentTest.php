@@ -239,7 +239,7 @@ class RecordingSubscription extends Subscription
         return parent::errorIfPaymentFails();
     }
 
-    public function swapAndInvoice(string|array $prices, array $options = [])
+    public function swapAndInvoice($prices, array $options = [])
     {
         if ($this->throwOnSwap !== null) {
             throw $this->throwOnSwap;
