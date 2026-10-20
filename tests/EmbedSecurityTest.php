@@ -189,11 +189,11 @@ class EmbedSecurityTest extends TestCase
         $alice = $this->createUser();
         $manager = app(LaraSaaS::class);
 
-        $captured = [];
+        $captured = new \ArrayObject;
 
         $this->app->bind(BillingActions::class, fn ($app) => new class($app->make(LaraSaaS::class), $captured) extends BillingActions
         {
-            public function __construct(LaraSaaS $larasaas, private array &$captured)
+            public function __construct(LaraSaaS $larasaas, private \ArrayObject $captured)
             {
                 parent::__construct($larasaas);
             }
@@ -258,12 +258,13 @@ class EmbedSecurityTest extends TestCase
         try {
             $monthlyHtml = $this->get($manager->embedUrl($alice, 'pricing', ['interval' => 'monthly']))->assertOk()->getContent();
             $this->assertStringContainsString('Current plan', (string) $monthlyHtml);
+            $this->assertStringContainsString('<button type="submit" class="ls-btn" disabled>', (string) $monthlyHtml);
             $this->assertStringNotContainsString('14-day free trial', (string) $monthlyHtml);
             $this->assertStringNotContainsString('target="_top"', (string) $monthlyHtml);
 
             $yearlyHtml = $this->get($manager->embedUrl($alice, 'pricing', ['interval' => 'yearly']))->assertOk()->getContent();
             $this->assertStringContainsString('Switch plan', (string) $yearlyHtml);
-            $this->assertStringNotContainsString('disabled', (string) $yearlyHtml);
+            $this->assertStringNotContainsString('<button type="submit" class="ls-btn" disabled>', (string) $yearlyHtml);
             $this->assertStringNotContainsString('14-day free trial', (string) $yearlyHtml);
         } finally {
             EmbedTestUser::$subscriptionsById = [];
