@@ -12,7 +12,7 @@
 ## Routing and security
 
 - Pricing GETs are public on Inertia/API/embed surfaces. Use separate public middleware stacks; retain auth on billing, invoices, announcements, feature flags and admin endpoints. API optional auth uses `route.pricing_guard`.
-- Signed embed identity must be in a valid, unexpired signed QUERY, never a POST body. Invalid identity (including an active session belonging to a different user, or a stale `ph` password hash fingerprint after a password change) is 403, not anonymous fallback. Re-signed embed navigation links must preserve the incoming `expires` ceiling instead of extending token lifetime on reload, embed responses send `Referrer-Policy: no-referrer`, and Stripe Checkout/Portal return URLs are generated server-side only (never accepted from embed form inputs or exposed in HTML). Embed writes skip CSRF and therefore always require signed user URLs. Guest embed links only support pricing.
+- Signed embed identity must be in a valid, unexpired signed QUERY, never a POST body. Invalid identity is 403, not anonymous fallback. Embed writes skip CSRF and therefore always require signed user URLs. Guest embed links only support pricing.
 - Admin routes require `larasaas-admin`; validate only catalog-defined feature keys and typed values. Stripe IDs must not overlap across plans. Do not trust frontend values for access control.
 - Route prefixes and names are configurable. New frontend links should come from server-generated URLs or shared `web_base`, not hard-coded `/app`.
 

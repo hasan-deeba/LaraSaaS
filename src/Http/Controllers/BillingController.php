@@ -9,7 +9,6 @@ use Inertia\Inertia;
 use LaraSaaS\LaraSaaS;
 use LaraSaaS\Support\BillingActions;
 use Symfony\Component\HttpFoundation\Response;
-use Symfony\Component\HttpKernel\Exception\HttpExceptionInterface;
 
 /**
  * Stripe Billing via Laravel Cashier — subscription provisioning, plan
@@ -51,15 +50,7 @@ class BillingController extends Controller
             'interval' => ['required', Rule::in(config('larasaas.pricing.intervals', ['monthly', 'yearly']))],
         ]);
 
-        try {
-            $result = $this->billing->subscribe($request, $plan, $interval);
-        } catch (HttpExceptionInterface $e) {
-            if ($e->getStatusCode() === 402) {
-                return back()->with('larasaas.notice', $e->getMessage());
-            }
-
-            throw $e;
-        }
+        $result = $this->billing->subscribe($request, $plan, $interval);
 
         if ($result['action'] === 'checkout') {
             return Inertia::location($result['url']);
@@ -69,7 +60,7 @@ class BillingController extends Controller
     }
 
     /**
-     * Swap between plans / intervals (invoiced immediately by Cashier).
+     * Swap between plans / intervals (prorated by Cashier).
      */
     public function swap(Request $request, string $plan): Response
     {
@@ -79,15 +70,7 @@ class BillingController extends Controller
             'interval' => ['required', Rule::in(config('larasaas.pricing.intervals', ['monthly', 'yearly']))],
         ]);
 
-        try {
-            $this->billing->swap($request, $plan, $interval);
-        } catch (HttpExceptionInterface $e) {
-            if ($e->getStatusCode() === 402) {
-                return back()->with('larasaas.notice', $e->getMessage());
-            }
-
-            throw $e;
-        }
+        $this->billing->swap($request, $plan, $interval);
 
         return back()->with('larasaas.notice', __('larasaas::larasaas.billing.swapped'));
     }

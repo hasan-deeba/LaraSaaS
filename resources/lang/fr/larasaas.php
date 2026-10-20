@@ -62,7 +62,6 @@ return [
         'ends_on'              => 'Se termine le :date',
         'resumed'              => 'Abonnement réactivé. Bon retour !',
         'swapped'              => 'Formule mise à jour avec succès.',
-        'payment_failed'       => 'Le paiement pour la nouvelle formule a échoué. Mettez à jour votre moyen de paiement dans le portail client puis réessayez.',
         'change_plan'          => 'Changer de formule',
         'invoices'             => 'Factures',
         'no_invoices'          => 'Aucune facture pour le moment.',

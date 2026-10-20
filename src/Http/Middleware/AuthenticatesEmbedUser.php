@@ -34,11 +34,9 @@ class AuthenticatesEmbedUser
         // Embed POSTs skip CSRF, so they MUST carry a signed user URL even
         // for session users. All rendered forms generate such URLs.
         abort_if(! $request->isMethodSafe() && ! $hasUserParam, 403);
-        if ($request->query->has('signature') || $request->query->has('expires') || $request->query->has('ph')) {
+        if ($request->query->has('signature') || $request->query->has('expires')) {
             abort_unless(URL::hasValidSignature($request) || URL::hasValidSignature($request, absolute: false), 403);
         }
-
-        $sessionUser = $request->user();
 
         if ($hasUserParam) {
             // A `user` parameter claims identity — only trust it when signed.
@@ -50,25 +48,8 @@ class AuthenticatesEmbedUser
             $user = $larasaas->usersQuery()->find($request->query('user'));
 
             abort_unless($user !== null, 403, __('larasaas::larasaas.embed.not_authenticated'));
-
-            // Never let a signed link for User A open inside User B's active session.
-            abort_if(
-                $sessionUser !== null && (string) $sessionUser->getAuthIdentifier() !== (string) $user->getAuthIdentifier(),
-                403,
-                __('larasaas::larasaas.embed.not_authenticated'),
-            );
-
-            if ($request->query->has('ph')) {
-                $expected = $larasaas->embedCredentialHash($user);
-
-                abort_unless(
-                    $expected !== null && hash_equals($expected, (string) $request->query('ph')),
-                    403,
-                    __('larasaas::larasaas.embed.not_authenticated'),
-                );
-            }
         } else {
-            $user = $sessionUser;
+            $user = $request->user();
 
             abort_unless($user !== null || ($mode === 'optional' && $request->isMethod('GET')), 403, __('larasaas::larasaas.embed.not_authenticated'));
         }
