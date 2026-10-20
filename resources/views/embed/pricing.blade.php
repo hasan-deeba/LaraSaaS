@@ -24,9 +24,15 @@
         @foreach ($pricing['plans'] as $key => $plan)
             @php
                 $amount    = $plan[$interval]['price'] ?? null;
+                $priceId   = $plan[$interval]['stripe_id'] ?? null;
+                $custom    = $amount === null || is_string($amount);
                 $symbol    = $pricing['currencies'][$pricing['currency']] ?? strtoupper($pricing['currency']);
-                $isCurrent = ($subscription['plan'] ?? null) === $key && ($subscription['subscribed'] ?? false);
+                $isCurrent = ! empty($subscription['subscribed'])
+                    && $priceId !== null
+                    && ($subscription['current_price_id'] ?? null) === $priceId;
                 $perLabel  = __('larasaas::larasaas.pricing.' . ($interval === 'yearly' ? 'per_yearly' : 'per_monthly'));
+                $trialDays = $plan['trial_days'] ?? $pricing['trial_days'] ?? 0;
+                $canTrial  = $trialDays && empty($subscription['subscribed']) && empty($subscription['stripe_status']);
             @endphp
             <div class="ls-card {{ ! empty($plan['highlight']) ? 'is-highlight' : '' }}">
                 <div>
@@ -42,15 +48,18 @@
                 <p class="ls-desc">{{ $plan['description'] ?? '' }}</p>
 
                 <div class="ls-price">
-                    <span class="ls-amount">{{ $symbol }}{{ $amount }}</span>
-                    <span class="ls-per">/ {{ $perLabel }}</span>
+                    @if ($custom)
+                        <span class="ls-amount">{{ $amount ?? __('larasaas::larasaas.pricing.custom') }}</span>
+                    @else
+                        <span class="ls-amount">{{ $symbol }}{{ $amount }}</span>
+                        <span class="ls-per">/ {{ $perLabel }}</span>
+                    @endif
                 </div>
-                @if ($interval === 'yearly' && ! empty($pricing['yearly_savings_badge']))
+                @if ($interval === 'yearly' && ! $custom && ! empty($pricing['yearly_savings_badge']))
                     <div class="ls-yearly-note">{{ $pricing['yearly_savings_badge'] }}</div>
                 @endif
 
-                @php($trialDays = $plan['trial_days'] ?? $pricing['trial_days'] ?? 0)
-                @if ($trialDays && empty($subscription['on_trial']) && ! $isCurrent)
+                @if ($canTrial && ! $isCurrent)
                     <div class="ls-trial">{{ str_replace('{days}', $trialDays, __('larasaas::larasaas.pricing.trial')) }}</div>
                 @endif
 
@@ -60,14 +69,17 @@
                     @endforeach
                 </ul>
 
-                @if ($user)
+                @if ($custom && ! empty($pricing['contact_sales']['enabled']))
+                    <a class="ls-btn is-ghost"
+                       href="{{ $pricing['contact_sales']['url'] }}" target="_blank" rel="noopener">
+                        {{ $pricing['contact_sales']['label'] }}
+                    </a>
+                @elseif ($user)
                 <form method="POST"
                       action="{{ $subscribe[$key] ?? '#' }}"
-                      target="_top">
+                      @if (empty($subscription['subscribed'])) target="_top" @endif>
                     <input type="hidden" name="interval" value="{{ $interval }}">
-                    <input type="hidden" name="success_url" value="{{ $returns['success'] }}">
-                    <input type="hidden" name="cancel_url" value="{{ $returns['canceled'] }}">
-                    <button type="submit" class="ls-btn" {{ $isCurrent || empty($plan[$interval]['stripe_id']) ? 'disabled' : '' }}>
+                    <button type="submit" class="ls-btn" {{ $isCurrent || empty($priceId) ? 'disabled' : '' }}>
                         @if ($isCurrent)
                             {{ __('larasaas::larasaas.pricing.current_plan') }}
                         @elseif (! empty($subscription['subscribed']))
@@ -79,13 +91,6 @@
                 </form>
                 @else
                     <a class="ls-btn" href="{{ config('larasaas.login_url', '/login') }}" target="_top">{{ __('larasaas::larasaas.pricing.sign_in') }}</a>
-                @endif
-
-                @if (! empty($pricing['contact_sales']['enabled']) && ($plan['monthly']['price'] ?? null) === null)
-                    <a class="ls-btn is-ghost" style="margin-top:10px"
-                       href="{{ $pricing['contact_sales']['url'] }}" target="_blank" rel="noopener">
-                        {{ $pricing['contact_sales']['label'] }}
-                    </a>
                 @endif
             </div>
         @endforeach

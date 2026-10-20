@@ -356,6 +356,16 @@ class LaraSaaS
 
     public function planKeyForPrice(?string $priceId): ?string
     {
+        return $this->priceDetails($priceId)['key'] ?? null;
+    }
+
+    /**
+     * Resolve catalog plan metadata (including archived plans) for a Stripe price ID.
+     *
+     * @return array{key: string, interval: string, price: float|int|null, plan: array}|null
+     */
+    public function priceDetails(?string $priceId): ?array
+    {
         if (! $priceId) {
             return null;
         }
@@ -366,7 +376,12 @@ class LaraSaaS
             $plan = $record->forPricing();
             foreach (['monthly', 'yearly'] as $interval) {
                 if (($plan[$interval]['stripe_id'] ?? null) === $priceId) {
-                    return $key;
+                    return [
+                        'key'      => $key,
+                        'interval' => $interval,
+                        'price'    => $plan[$interval]['price'] ?? null,
+                        'plan'     => $plan,
+                    ];
                 }
             }
         }
@@ -492,23 +507,42 @@ class LaraSaaS
      * Private billing: embedUrl($user, 'billing') — signed and expiring.
      * Embeds are customer-facing only; manage plans through createPlan/updatePlan.
      */
-    public function embedUrl($user = null, string $page = 'pricing', array $params = [], ?int $minutes = null): string
+    public function embedUrl($user = null, string $page = 'pricing', array $params = [], \DateTimeInterface|int|null $minutes = null): string
     {
         if ($user === null) {
             if ($page !== 'pricing') {
                 throw new LogicException('Only embed pricing can be viewed without a user.');
             }
 
-            return route($this->embedRouteName('pricing'), array_diff_key($params, array_flip(['user', 'signature', 'expires'])));
+            return route($this->embedRouteName('pricing'), array_diff_key($params, array_flip(['user', 'signature', 'expires', 'ph'])));
         }
 
-        $ttl = $minutes ?? (int) config('larasaas.integration.embed.token_ttl', 60);
+        $expiration = $minutes instanceof \DateTimeInterface
+            ? $minutes
+            : now()->addMinutes(max(1, $minutes ?? (int) config('larasaas.integration.embed.token_ttl', 60)));
 
-        return URL::temporarySignedRoute(
-            $this->embedRouteName($page),
-            now()->addMinutes(max(1, $ttl)),
-            array_merge($params, ['user' => $user->getAuthIdentifier()]),
-        );
+        $query = array_merge($params, ['user' => $user->getAuthIdentifier()]);
+
+        if (($hash = $this->embedCredentialHash($user)) !== null) {
+            $query['ph'] = $hash;
+        }
+
+        return URL::temporarySignedRoute($this->embedRouteName($page), $expiration, $query);
+    }
+
+    /**
+     * Bind signed embed URLs to the user's current password hash when loaded so
+     * resetting/changing a password immediately revokes leaked embed links.
+     */
+    public function embedCredentialHash($user): ?string
+    {
+        $password = $user instanceof Model ? ($user->getAttributes()['password'] ?? null) : null;
+
+        if (! is_string($password) || $password === '') {
+            return null;
+        }
+
+        return substr(hash_hmac('sha256', $password, (string) config('app.key')), 0, 16);
     }
 
     /*

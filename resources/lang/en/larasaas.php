@@ -62,6 +62,7 @@ return [
         'ends_on'              => 'Ends on :date',
         'resumed'              => 'Subscription resumed. Welcome back!',
         'swapped'              => 'Plan updated successfully.',
+        'payment_failed'       => 'Payment could not be completed for the new plan. Please update your payment method in the customer portal and try again.',
         'change_plan'          => 'Change plan',
         'invoices'             => 'Invoices',
         'no_invoices'          => 'No invoices yet.',

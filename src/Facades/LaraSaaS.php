@@ -21,6 +21,7 @@ use Illuminate\Support\Facades\Facade;
  * @method static array pricingForUi()
  * @method static array subscriptionForUi(\Illuminate\Http\Request $request)
  * @method static string|null planKeyForPrice(?string $priceId)
+ * @method static array|null priceDetails(?string $priceId)
  * @method static array announcementTypes()
  * @method static array announcementType(string $type)
  * @method static string textDirection(?string $locale = null)
@@ -34,7 +35,8 @@ use Illuminate\Support\Facades\Facade;
  * @method static bool servesApi()
  * @method static bool servesEmbed()
  * @method static string embedRouteName(string $page)
- * @method static string embedUrl($user = null, string $page = 'pricing', array $params = [], ?int $minutes = null)
+ * @method static string embedUrl($user = null, string $page = 'pricing', array $params = [], \DateTimeInterface|int|null $minutes = null)
+ * @method static ?string embedCredentialHash($user)
  *
  * @see \LaraSaaS\LaraSaaS
  */
