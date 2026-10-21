@@ -5,7 +5,6 @@ namespace LaraSaaS\Http\Controllers;
 use Illuminate\Support\Facades\Log;
 use LaraSaaS\Events\SubscriptionChanged;
 use LaraSaaS\LaraSaaS;
-use Laravel\Cashier\Billable;
 use Laravel\Cashier\Http\Controllers\WebhookController as CashierWebhookController;
 use Symfony\Component\HttpFoundation\Response;
 
@@ -45,7 +44,9 @@ class StripeWebhookController extends CashierWebhookController
 
     protected function handleInvoicePaymentSucceeded(array $payload): Response
     {
-        $response = parent::handleInvoicePaymentSucceeded($payload);
+        $response = method_exists(parent::class, 'handleInvoicePaymentSucceeded')
+            ? parent::handleInvoicePaymentSucceeded($payload)
+            : $this->successMethod();
 
         $this->fire('invoice.payment_succeeded', $payload);
 
@@ -66,8 +67,14 @@ class StripeWebhookController extends CashierWebhookController
      * boot; this is the safety net that turns any remaining mismatch into ONE
      * actionable log line instead of a PHP class-loading error, and recovers
      * automatically when only the static was clobbered.
+     *
+     * Note: `Laravel\Cashier\Billable` is a PHP trait (not an interface/class),
+     * so never declare `: ?Billable` here — PHP throws a `TypeError` whenever a
+     * real model instance is returned.
+     *
+     * @return \Illuminate\Database\Eloquent\Model|null
      */
-    protected function getUserByStripeId($stripeId): ?Billable
+    protected function getUserByStripeId($stripeId)
     {
         /** @var LaraSaaS $larasaas */
         $larasaas = app(LaraSaaS::class);
