@@ -39,7 +39,10 @@ export interface PricingConfig {
 export interface SubscriptionState {
     subscribed?: boolean;
     on_grace_period?: boolean;
+    on_trial?: boolean;
     ends_at?: string | null;
+    trial_ends_at?: string | null;
+    stripe_status?: string | null;
     current_price_id?: string | null;
     plan?: string | null;
 }
@@ -132,8 +135,13 @@ export default function PricingTable({ pricing, subscription, onSelect, initialI
                                 )}
                             </div>
 
-                            {plan.trial_days ? (
-                                <p className="ls-plan__trial">{t('pricing.trial', '{days}-day free trial').replace('{days}', String(plan.trial_days))}</p>
+                            {!subscription?.subscribed && !subscription?.stripe_status && (plan.trial_days ?? pricing.trial_days) ? (
+                                <p className="ls-plan__trial">
+                                    {t('pricing.trial', '{days}-day free trial').replace(
+                                        '{days}',
+                                        String(plan.trial_days ?? pricing.trial_days)
+                                    )}
+                                </p>
                             ) : null}
 
                             <ul className="ls-plan__features">

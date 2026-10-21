@@ -40,7 +40,11 @@
                         <span class="ls-badge">{{ $plan['badge'] }}</span>
                     @endif
                     @if ($isCurrent)
-                        <span class="ls-badge is-ok">{{ __('larasaas::larasaas.pricing.current_plan') }}</span>
+                        @if (! empty($subscription['on_grace_period']))
+                            <span class="ls-badge is-warn">{{ __('larasaas::larasaas.billing.cancels_on', ['date' => $subscription['ends_at'] ?? '—']) }}</span>
+                        @else
+                            <span class="ls-badge is-ok">{{ __('larasaas::larasaas.pricing.current_plan') }}</span>
+                        @endif
                     @endif
                 </div>
 

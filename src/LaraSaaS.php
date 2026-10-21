@@ -5,12 +5,16 @@ namespace LaraSaaS;
 use Illuminate\Contracts\Auth\Authenticatable;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Http\Request;
+use Illuminate\Support\Collection;
+use Illuminate\Support\Facades\Schema;
 use Illuminate\Support\Facades\URL;
 use LaraSaaS\Models\Plan;
 use LaraSaaS\Support\PlanFeatures;
 use LaraSaaS\Support\PlanManager;
 use LaraSaaS\Support\WorkspaceManager;
 use Laravel\Cashier\Billable;
+use Laravel\Cashier\Cashier;
+use Laravel\Cashier\Subscription;
 use LogicException;
 
 /**
@@ -327,6 +331,77 @@ class LaraSaaS
     }
 
     /**
+     * Every currently valid (`active`, `onTrial`, or `onGracePeriod`) subscription
+     * for the configured subscription type, preferring uncanceled subscriptions
+     * first so a canceled duplicate never masks an active one.
+     *
+     * @return Collection<int, Subscription>
+     */
+    public function validSubscriptions($billable, ?string $name = null): Collection
+    {
+        if (! $billable) {
+            return collect();
+        }
+
+        $name ??= $this->subscriptionName();
+
+        if ($this->hasSubscriptionsTable()) {
+            $valid = $billable->subscriptions
+                ->where('type', $name)
+                ->filter(fn ($sub) => $sub->valid())
+                ->sortBy(fn ($sub) => $sub->onGracePeriod() ? 1 : 0)
+                ->values();
+
+            if ($valid->isNotEmpty()) {
+                return $valid;
+            }
+        }
+
+        $single = $billable->subscription($name);
+
+        return $single && $single->valid() ? collect([$single]) : collect();
+    }
+
+    /**
+     * Primary subscription for UI & entitlements: prefers an active/trialing
+     * subscription over a grace-period or ended duplicate.
+     */
+    public function currentSubscription($billable, ?string $name = null): ?Subscription
+    {
+        if (! $billable) {
+            return null;
+        }
+
+        $name ??= $this->subscriptionName();
+
+        return $this->validSubscriptions($billable, $name)->first()
+            ?? $billable->subscription($name);
+    }
+
+    public function isSubscribed($billable, ?string $priceId = null): bool
+    {
+        $valid = $this->validSubscriptions($billable);
+
+        if ($valid->isEmpty()) {
+            return false;
+        }
+
+        return $priceId === null
+            || $valid->contains(fn ($sub) => $sub->hasPrice($priceId));
+    }
+
+    protected function hasSubscriptionsTable(): bool
+    {
+        try {
+            $modelClass = Cashier::$subscriptionModel;
+
+            return Schema::hasTable((new $modelClass)->getTable());
+        } catch (\Throwable) {
+            return false;
+        }
+    }
+
+    /**
      * Current subscription state for the React billing page.
      */
     public function subscriptionForUi(Request $request): array
@@ -337,13 +412,12 @@ class LaraSaaS
             return ['subscribed' => false];
         }
 
-        $name = $this->subscriptionName();
-        $subscription = $billable->subscription($name);
-
-        $onGrace = (bool) ($subscription?->onGracePeriod());
+        $subscription = $this->currentSubscription($billable);
+        $subscribed   = $this->isSubscribed($billable);
+        $onGrace      = (bool) ($subscription?->onGracePeriod());
 
         return [
-            'subscribed'       => $billable->subscribed($name),
+            'subscribed'       => $subscribed,
             'on_grace_period'  => $onGrace,
             'on_trial'         => (bool) ($subscription?->onTrial()),
             'ends_at'          => $subscription?->ends_at?->toDateString(),
@@ -403,10 +477,10 @@ class LaraSaaS
         }
         $denied = $definition['type'] === 'boolean' ? false : 0;
         $billable = $this->billable($request);
-        if (! $billable || ! $billable->subscribed($this->subscriptionName())) {
+        if (! $billable || ! $this->isSubscribed($billable)) {
             return $denied;
         }
-        $key = $this->planKeyForPrice($billable->subscription($this->subscriptionName())?->stripe_price);
+        $key = $this->planKeyForPrice($this->currentSubscription($billable)?->stripe_price);
         $plan = $key ? Plan::query()->where('key', $key)->first() : null;
 
         return $plan ? app(PlanFeatures::class)->values($plan->features ?? [])[$feature] : $denied;

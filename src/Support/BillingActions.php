@@ -3,8 +3,13 @@
 namespace LaraSaaS\Support;
 
 use Illuminate\Http\Request;
+use Illuminate\Support\Carbon;
+use Illuminate\Support\Collection;
 use Illuminate\Support\Facades\Route;
+use Illuminate\Support\Facades\Schema;
 use LaraSaaS\LaraSaaS;
+use Laravel\Cashier\Cashier;
+use Laravel\Cashier\Subscription;
 
 /**
  * Billing operations shared by every integration surface — the Inertia web
@@ -29,7 +34,12 @@ class BillingActions
         $billable = $this->larasaas->billable($request) ?? abort(403);
         $name     = $this->larasaas->subscriptionName();
 
-        if ($billable->subscribed($name)) {
+        // Always reconcile with Stripe first so completed Checkouts are seen
+        // immediately even before (or without) webhook delivery — preventing
+        // duplicate parallel subscriptions and repeat free trials.
+        $this->syncFromStripe($billable);
+
+        if ($this->larasaas->isSubscribed($billable)) {
             $this->swap($request, $plan, $interval);
 
             return ['action' => 'swap', 'url' => null];
@@ -74,8 +84,8 @@ class BillingActions
     /**
      * Swap between plans / intervals: immediately invoices and collects payment
      * (`always_invoice` + `error_if_incomplete`) so unpaid upgrades can never
-     * activate, and ends any free trial when upgrading or switching to a
-     * non-trial plan.
+     * activate, ends any free trial when upgrading or switching to a non-trial
+     * plan, and cleans up any duplicate parallel subscriptions on the customer.
      */
     public function swap(Request $request, string $plan, string $interval): void
     {
@@ -86,12 +96,25 @@ class BillingActions
         $billable = $this->larasaas->billable($request) ?? abort(403);
         $name     = $this->larasaas->subscriptionName();
 
-        abort_unless($billable->subscribed($name), 403);
+        $this->syncFromStripe($billable);
 
-        $subscription = $billable->subscription($name);
+        $valid = $this->larasaas->validSubscriptions($billable, $name);
+
+        abort_if($valid->isEmpty(), 403);
+
+        /** @var Subscription $subscription */
+        $subscription = $valid->first();
+        $duplicates   = $valid->slice(1);
         $targetPrice  = $planConfig[$interval]['stripe_id'];
 
-        if (! $subscription->onGracePeriod() && $subscription->stripe_price === $targetPrice) {
+        if ($subscription->stripe_price === $targetPrice) {
+            if ($subscription->onGracePeriod()) {
+                $subscription->resume();
+            }
+
+            $this->terminateDuplicateSubscriptions($duplicates);
+            $billable->unsetRelation('subscriptions');
+
             return;
         }
 
@@ -108,6 +131,9 @@ class BillingActions
 
             throw $e;
         }
+
+        $this->terminateDuplicateSubscriptions($duplicates);
+        $billable->unsetRelation('subscriptions');
     }
 
     /**
@@ -152,24 +178,50 @@ class BillingActions
     public function cancel(Request $request): void
     {
         $billable = $this->larasaas->billable($request) ?? abort(403);
+        $name     = $this->larasaas->subscriptionName();
 
-        $billable->subscription($this->larasaas->subscriptionName())?->cancel();
+        $this->syncFromStripe($billable);
+
+        $valid = $this->larasaas->validSubscriptions($billable, $name);
+
+        if ($valid->isEmpty()) {
+            return;
+        }
+
+        /** @var Subscription $primary */
+        $primary = $valid->first();
+
+        if (! $primary->onGracePeriod()) {
+            $primary->cancel();
+        }
+
+        // Terminate any extra duplicate subscriptions immediately so the
+        // customer never has leftover active subscriptions in Stripe.
+        $this->terminateDuplicateSubscriptions($valid->slice(1));
+        $billable->unsetRelation('subscriptions');
     }
 
     public function resume(Request $request): void
     {
         $billable = $this->larasaas->billable($request) ?? abort(403);
-        $subscription = $billable->subscription($this->larasaas->subscriptionName());
+        $name     = $this->larasaas->subscriptionName();
+
+        $this->syncFromStripe($billable);
+
+        $subscription = $this->larasaas->currentSubscription($billable, $name);
 
         abort_unless($subscription?->onGracePeriod(), 403);
 
         $subscription->resume();
+        $billable->unsetRelation('subscriptions');
     }
 
     /** Stripe's hosted customer portal — invoices, cards, cancellation. */
     public function portalUrl(Request $request): string
     {
         $billable = $this->larasaas->billable($request) ?? abort(403);
+
+        $this->syncFromStripe($billable);
 
         return $billable->billingPortalUrl($this->successUrl($request));
     }
@@ -191,6 +243,143 @@ class BillingActions
                 'pdf'    => $invoice->invoice_pdf,
             ])
             ->all();
+    }
+
+    /**
+     * Reconcile a customer's Stripe subscriptions directly into Cashier's local
+     * tables so Checkout redirects, Portal cancellations, and local development
+     * without `stripe listen` always stay in sync with Stripe.
+     */
+    public function syncFromStripe($billable): void
+    {
+        if (! $billable
+            || empty($billable->stripe_id)
+            || ! config('cashier.secret')
+            || ! method_exists($billable, 'subscriptions')
+            || ! $this->hasSubscriptionsTable()) {
+            return;
+        }
+
+        try {
+            $options = method_exists($billable, 'stripeOptions') ? $billable->stripeOptions() : [];
+            $remote  = Cashier::stripe($options)->subscriptions->all([
+                'customer' => $billable->stripe_id,
+                'status'   => 'all',
+                'limit'    => 25,
+            ]);
+        } catch (\Throwable) {
+            return;
+        }
+
+        $defaultType = $this->larasaas->subscriptionName();
+
+        foreach ($remote->data ?? [] as $stripeSub) {
+            $items = $stripeSub->items->data ?? [];
+
+            if ($items === []) {
+                continue;
+            }
+
+            if (($stripeSub->status ?? null) === 'incomplete_expired') {
+                $existing = $billable->subscriptions()->where('stripe_id', $stripeSub->id)->first();
+                if ($existing) {
+                    $existing->items()->delete();
+                    $existing->delete();
+                }
+
+                continue;
+            }
+
+            $firstItem     = $items[0];
+            $isSinglePrice = count($items) === 1;
+            $metadata      = is_array($stripeSub->metadata ?? null)
+                ? $stripeSub->metadata
+                : (is_object($stripeSub->metadata ?? null) && method_exists($stripeSub->metadata, 'toArray')
+                    ? $stripeSub->metadata->toArray()
+                    : []);
+            $type = $metadata['type'] ?? $metadata['name'] ?? $defaultType;
+
+            $trialEndsAt = ! empty($stripeSub->trial_end)
+                ? Carbon::createFromTimestamp((int) $stripeSub->trial_end)
+                : null;
+
+            $periodEnd = $stripeSub->current_period_end
+                ?? ($firstItem->current_period_end ?? null);
+
+            if (($stripeSub->status ?? null) === 'canceled') {
+                $trialEndsAt = null;
+                $endsAt      = Carbon::createFromTimestamp((int) ($stripeSub->ended_at ?? $stripeSub->canceled_at ?? time()));
+            } elseif (! empty($stripeSub->cancel_at_period_end)) {
+                $endsAt = ($trialEndsAt && $trialEndsAt->isFuture())
+                    ? $trialEndsAt
+                    : ($periodEnd ? Carbon::createFromTimestamp((int) $periodEnd) : null);
+            } elseif (! empty($stripeSub->cancel_at)) {
+                $endsAt = Carbon::createFromTimestamp((int) $stripeSub->cancel_at);
+            } else {
+                $endsAt = null;
+            }
+
+            $subscription = $billable->subscriptions()->firstOrNew([
+                'stripe_id' => $stripeSub->id,
+            ]);
+
+            if (! $subscription->exists && ! empty($stripeSub->created)) {
+                $subscription->created_at = Carbon::createFromTimestamp((int) $stripeSub->created);
+            }
+
+            $subscription->fill([
+                'type'          => $subscription->type ?: $type,
+                'stripe_status' => $stripeSub->status,
+                'stripe_price'  => $isSinglePrice ? ($firstItem->price->id ?? null) : null,
+                'quantity'      => $isSinglePrice ? ($firstItem->quantity ?? null) : null,
+                'trial_ends_at' => $trialEndsAt,
+                'ends_at'       => $endsAt,
+            ])->save();
+
+            $itemIds = [];
+
+            foreach ($items as $item) {
+                $itemIds[] = $item->id;
+
+                $subscription->items()->updateOrCreate(
+                    ['stripe_id' => $item->id],
+                    [
+                        'stripe_product' => is_string($item->price->product) ? $item->price->product : $item->price->product->id,
+                        'stripe_price'   => $item->price->id,
+                        'quantity'       => $item->quantity ?? null,
+                    ],
+                );
+            }
+
+            $subscription->items()->whereNotIn('stripe_id', $itemIds)->delete();
+        }
+
+        $billable->unsetRelation('subscriptions');
+    }
+
+    /**
+     * @param  Collection<int, Subscription>  $duplicates
+     */
+    protected function terminateDuplicateSubscriptions(Collection $duplicates): void
+    {
+        foreach ($duplicates as $duplicate) {
+            try {
+                $duplicate->cancelNow();
+            } catch (\Throwable) {
+                $duplicate->skipTrial()->markAsCanceled();
+            }
+        }
+    }
+
+    protected function hasSubscriptionsTable(): bool
+    {
+        try {
+            $modelClass = Cashier::$subscriptionModel;
+
+            return Schema::hasTable((new $modelClass)->getTable());
+        } catch (\Throwable) {
+            return false;
+        }
     }
 
     protected function guardPrice(array $planConfig, string $plan, string $interval): void

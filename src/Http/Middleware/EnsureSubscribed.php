@@ -27,7 +27,11 @@ class EnsureSubscribed
 
         $name = $larasaas->subscriptionName();
 
-        if (! $billable->subscribed($name)) {
+        if (! $larasaas->isSubscribed($billable)) {
+            app(\LaraSaaS\Support\BillingActions::class)->syncFromStripe($billable);
+        }
+
+        if (! $larasaas->isSubscribed($billable)) {
             $pricingRoute = $larasaas->routeName('pricing');
 
             if ($request->expectsJson() || ! $larasaas->servesInertia() || ! \Illuminate\Support\Facades\Route::has($pricingRoute)) {
@@ -39,8 +43,12 @@ class EnsureSubscribed
                 ->with('larasaas.notice', __('larasaas::larasaas.billing.subscription_required'));
         }
 
-        if ($priceId && ! $billable->subscribedToPrice($priceId, $name)) {
-            abort(402, __('larasaas::larasaas.billing.plan_required'));
+        if ($priceId && ! $larasaas->isSubscribed($billable, $priceId)) {
+            app(\LaraSaaS\Support\BillingActions::class)->syncFromStripe($billable);
+
+            if (! $larasaas->isSubscribed($billable, $priceId)) {
+                abort(402, __('larasaas::larasaas.billing.plan_required'));
+            }
         }
 
         return $next($request);

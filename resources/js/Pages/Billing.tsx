@@ -46,7 +46,9 @@ export default function Billing() {
                             {subscription?.subscribed
                                 ? subscription.on_grace_period
                                     ? t('billing.cancels_on', 'Cancels on {date}').replace('{date}', subscription.ends_at ?? '')
-                                    : t('billing.active', 'Active')
+                                    : subscription.on_trial
+                                      ? t('billing.on_trial', 'Free trial')
+                                      : t('billing.active', 'Active')
                                 : t('billing.no_subscription', 'No active subscription')}
                         </p>
                     </div>

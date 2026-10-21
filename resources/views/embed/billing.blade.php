@@ -12,10 +12,10 @@
         <h2>{{ __('larasaas::larasaas.billing.status') }}</h2>
         <p class="ls-sub">
             @if (! empty($subscription['subscribed']))
-                @if (! empty($subscription['on_trial']))
-                    <span class="ls-badge is-ok">{{ __('larasaas::larasaas.billing.on_trial') }}</span>
-                @elseif (! empty($subscription['on_grace_period']))
+                @if (! empty($subscription['on_grace_period']))
                     <span class="ls-badge is-warn">{{ __('larasaas::larasaas.billing.cancels_on', ['date' => $subscription['ends_at'] ?? '—']) }}</span>
+                @elseif (! empty($subscription['on_trial']))
+                    <span class="ls-badge is-ok">{{ __('larasaas::larasaas.billing.on_trial') }}</span>
                 @else
                     <span class="ls-badge is-ok">{{ __('larasaas::larasaas.billing.active') }}</span>
                 @endif
@@ -33,14 +33,15 @@
             <dt>{{ __('larasaas::larasaas.dashboard.plan') }}</dt>
             <dd>{{ $planName }}</dd>
 
-            @if (! empty($subscription['on_trial']) && ! empty($subscription['trial_ends_at']))
+            @if (! empty($subscription['on_grace_period']) && ! empty($subscription['ends_at']))
+                <dt>{{ __('larasaas::larasaas.billing.status') }}</dt>
+                <dd>{{ __('larasaas::larasaas.billing.cancels_on', ['date' => $subscription['ends_at']]) }}</dd>
+            @elseif (! empty($subscription['on_trial']) && ! empty($subscription['trial_ends_at']))
                 <dt>{{ __('larasaas::larasaas.billing.status') }}</dt>
                 <dd>{{ __('larasaas::larasaas.dashboard.trial_until', ['date' => $subscription['trial_ends_at']]) }}</dd>
             @elseif (! empty($subscription['ends_at']))
                 <dt>{{ __('larasaas::larasaas.billing.status') }}</dt>
-                <dd>{{ ($subscription['on_grace_period'] ?? false)
-                        ? __('larasaas::larasaas.billing.cancels_on', ['date' => $subscription['ends_at']])
-                        : __('larasaas::larasaas.billing.ends_on', ['date' => $subscription['ends_at']]) }}</dd>
+                <dd>{{ __('larasaas::larasaas.billing.ends_on', ['date' => $subscription['ends_at']]) }}</dd>
             @endif
 
             @if (! empty($subscription['stripe_status']))
