@@ -37,8 +37,6 @@ class EmbedController extends Controller
         $user     = $request->user();
         $interval = $this->interval($request);
 
-        $this->billing->syncFromStripe($this->larasaas->billable($request));
-
         return response()->view('larasaas::embed.pricing', [
             'user'         => $user,
             'interval'     => $interval,
@@ -62,8 +60,6 @@ class EmbedController extends Controller
     public function billing(Request $request): Response
     {
         $user = $request->user();
-
-        $this->billing->syncFromStripe($this->larasaas->billable($request));
 
         return response()->view('larasaas::embed.billing', [
             'user'         => $user,

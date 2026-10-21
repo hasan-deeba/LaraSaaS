@@ -23,8 +23,6 @@ class BillingController extends Controller
 
     public function pricing(Request $request): \Inertia\Response
     {
-        $this->billing->syncFromStripe($this->larasaas->billable($request));
-
         return Inertia::render($this->larasaas->page('Pricing'), [
             'pricing'      => $this->larasaas->pricingForUi(),
             'subscription' => $this->larasaas->subscriptionForUi($request),
@@ -34,8 +32,6 @@ class BillingController extends Controller
 
     public function index(Request $request): \Inertia\Response
     {
-        $this->billing->syncFromStripe($this->larasaas->billable($request));
-
         return Inertia::render($this->larasaas->page('Billing'), [
             'pricing'      => $this->larasaas->pricingForUi(),
             'subscription' => $this->larasaas->subscriptionForUi($request),
