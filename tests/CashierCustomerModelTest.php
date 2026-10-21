@@ -102,6 +102,124 @@ class CashierCustomerModelTest extends TestCase
         $this->assertSame(NamespacedBillingUser::class, Cashier::$customerModel);
     }
 
+    public function test_the_webhook_resolves_a_real_billable_customer_and_handles_full_lifecycle_events(): void
+    {
+        \Illuminate\Support\Facades\Schema::create('users', function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->id();
+            $table->string('email');
+            $table->string('stripe_id')->nullable()->index();
+            $table->timestamps();
+        });
+
+        \Illuminate\Support\Facades\Schema::create('subscriptions', function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->id();
+            $table->foreignId('user_id');
+            $table->string('type');
+            $table->string('stripe_id')->unique();
+            $table->string('stripe_status');
+            $table->string('stripe_price')->nullable();
+            $table->integer('quantity')->nullable();
+            $table->timestamp('trial_ends_at')->nullable();
+            $table->timestamp('ends_at')->nullable();
+            $table->timestamps();
+        });
+
+        \Illuminate\Support\Facades\Schema::create('subscription_items', function (\Illuminate\Database\Schema\Blueprint $table) {
+            $table->id();
+            $table->foreignId('subscription_id');
+            $table->string('stripe_id')->unique();
+            $table->string('stripe_product');
+            $table->string('stripe_price');
+            $table->integer('quantity')->nullable();
+            $table->timestamps();
+        });
+
+        \Illuminate\Support\Facades\Event::fake([\LaraSaaS\Events\SubscriptionChanged::class]);
+
+        try {
+            $user = NamespacedBillingUser::create([
+                'email' => 'webhook-live@example.com',
+                'stripe_id' => 'cus_live_namespaced_1',
+            ]);
+
+            $controller = new \LaraSaaS\Http\Controllers\StripeWebhookController;
+            $lookup = new \ReflectionMethod($controller, 'getUserByStripeId');
+            $lookup->setAccessible(true);
+
+            // Returning a real Eloquent model using the Billable trait must NOT
+            // throw `TypeError: Return value must be of type ?Laravel\Cashier\Billable`.
+            $resolved = $lookup->invoke($controller, 'cus_live_namespaced_1');
+            $this->assertInstanceOf(NamespacedBillingUser::class, $resolved);
+            $this->assertSame($user->id, $resolved->id);
+
+            $baseSub = [
+                'id' => 'sub_webhook_1',
+                'customer' => 'cus_live_namespaced_1',
+                'status' => 'active',
+                'metadata' => ['type' => 'default'],
+                'trial_end' => null,
+                'current_period_end' => now()->addMonth()->timestamp,
+                'cancel_at_period_end' => false,
+                'items' => [
+                    'data' => [[
+                        'id' => 'si_webhook_1',
+                        'quantity' => 1,
+                        'current_period_end' => now()->addMonth()->timestamp,
+                        'price' => [
+                            'id' => 'price_starter_monthly',
+                            'product' => 'prod_starter',
+                        ],
+                    ]],
+                ],
+            ];
+
+            // 1. Created webhook writes local subscription row & dispatches event.
+            $this->postJson('/larasaas/webhooks/stripe', [
+                'id' => 'evt_created_1',
+                'type' => 'customer.subscription.created',
+                'data' => ['object' => $baseSub],
+            ])->assertOk();
+
+            $this->assertSame('price_starter_monthly', $user->fresh()->subscription('default')?->stripe_price);
+
+            // 2. Updated webhook swaps plan in local DB cleanly.
+            $updatedSub = $baseSub;
+            $updatedSub['items']['data'][0]['price']['id'] = 'price_pro_monthly';
+            $this->postJson('/larasaas/webhooks/stripe', [
+                'id' => 'evt_updated_1',
+                'type' => 'customer.subscription.updated',
+                'data' => ['object' => $updatedSub],
+            ])->assertOk();
+
+            $this->assertSame('price_pro_monthly', $user->fresh()->subscription('default')?->stripe_price);
+
+            // 3. Invoice payment succeeded succeeds across both Cashier 15 & 16.
+            $this->postJson('/larasaas/webhooks/stripe', [
+                'id' => 'evt_invoice_1',
+                'type' => 'invoice.payment_succeeded',
+                'data' => ['object' => [
+                    'id' => 'in_webhook_1',
+                    'customer' => 'cus_live_namespaced_1',
+                    'subscription' => 'sub_webhook_1',
+                ]],
+            ])->assertOk();
+
+            // 4. Deleted webhook marks local subscription canceled.
+            $this->postJson('/larasaas/webhooks/stripe', [
+                'id' => 'evt_deleted_1',
+                'type' => 'customer.subscription.deleted',
+                'data' => ['object' => $updatedSub],
+            ])->assertOk();
+
+            $this->assertFalse($user->fresh()->subscribed('default'));
+            \Illuminate\Support\Facades\Event::assertDispatchedTimes(\LaraSaaS\Events\SubscriptionChanged::class, 4);
+        } finally {
+            \Illuminate\Support\Facades\Schema::dropIfExists('subscription_items');
+            \Illuminate\Support\Facades\Schema::dropIfExists('subscriptions');
+            \Illuminate\Support\Facades\Schema::dropIfExists('users');
+        }
+    }
+
     public function test_the_webhook_fails_loudly_when_no_billable_model_can_be_loaded(): void
     {
         // Both the Cashier static and the configured billable are unloadable —
@@ -217,6 +335,11 @@ class NamespacedBillingUser extends User
 
     protected $table = 'users';
     protected $guarded = [];
+
+    public function getForeignKey()
+    {
+        return 'user_id';
+    }
 }
 
 class NamespacedUserWithoutTrait extends User

@@ -24,8 +24,6 @@ class BillingApiController extends Controller
      */
     public function pricing(Request $request): JsonResponse
     {
-        $this->billing->syncFromStripe($this->larasaas->billable($request));
-
         return response()->json([
             'data' => $this->larasaas->pricingForUi(),
             'subscription' => $this->larasaas->subscriptionForUi($request),
@@ -38,8 +36,6 @@ class BillingApiController extends Controller
      */
     public function subscription(Request $request): JsonResponse
     {
-        $this->billing->syncFromStripe($this->larasaas->billable($request));
-
         return response()->json([
             'data' => $this->larasaas->subscriptionForUi($request),
         ]);
