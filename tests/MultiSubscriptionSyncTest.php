@@ -353,6 +353,11 @@ class SyncTestUser extends User
     protected $table = 'users';
     protected $guarded = [];
 
+    public function getForeignKey()
+    {
+        return 'user_id';
+    }
+
     public function newSubscription($type, $prices = []): \Laravel\Cashier\SubscriptionBuilder
     {
         self::$checkoutOpened = true;
@@ -399,6 +404,11 @@ class FakeStripeSubscriptionsEndpoint
 class TrackingCashierSubscription extends Subscription
 {
     protected $table = 'subscriptions';
+
+    public function getForeignKey()
+    {
+        return 'subscription_id';
+    }
 
     /** @var array<string, string> */
     public static array $swapped = [];

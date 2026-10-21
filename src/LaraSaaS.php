@@ -346,14 +346,18 @@ class LaraSaaS
         $name ??= $this->subscriptionName();
 
         if ($this->hasSubscriptionsTable()) {
-            $valid = $billable->subscriptions
-                ->where('type', $name)
-                ->filter(fn ($sub) => $sub->valid())
-                ->sortBy(fn ($sub) => $sub->onGracePeriod() ? 1 : 0)
-                ->values();
+            try {
+                $valid = $billable->subscriptions
+                    ->where('type', $name)
+                    ->filter(fn ($sub) => $sub->valid())
+                    ->sortBy(fn ($sub) => $sub->onGracePeriod() ? 1 : 0)
+                    ->values();
 
-            if ($valid->isNotEmpty()) {
-                return $valid;
+                if ($valid->isNotEmpty()) {
+                    return $valid;
+                }
+            } catch (\Throwable) {
+                // Fall back cleanly to `$billable->subscription($name)` below.
             }
         }
 
