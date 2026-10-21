@@ -218,6 +218,17 @@ class PlansTest extends TestCase
         $this->assertStringContainsString('interval=monthly', $location);
     }
 
+    public function test_embed_links_preserve_arabic_locale_and_render_rtl_translations(): void
+    {
+        app()->setLocale('ar_SA');
+        $url = app(LaraSaaS::class)->embedUrl();
+
+        $this->assertStringContainsString('locale=ar', $url);
+        $this->get($url)->assertOk()
+            ->assertSee('الأسعار')
+            ->assertSee('dir="rtl"', false);
+    }
+
     public function test_signed_embed_identity_is_optional_but_never_trusted_unsigned(): void
     {
         $user = $this->user();

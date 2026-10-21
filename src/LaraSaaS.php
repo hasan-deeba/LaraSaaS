@@ -509,6 +509,8 @@ class LaraSaaS
      */
     public function embedUrl($user = null, string $page = 'pricing', array $params = [], \DateTimeInterface|int|null $minutes = null): string
     {
+        $params['locale'] = $this->embedLocale((string) ($params['locale'] ?? app()->getLocale()));
+
         if ($user === null) {
             if ($page !== 'pricing') {
                 throw new LogicException('Only embed pricing can be viewed without a user.');
@@ -528,6 +530,16 @@ class LaraSaaS
         }
 
         return URL::temporarySignedRoute($this->embedRouteName($page), $expiration, $query);
+    }
+
+    /** Normalize locale variants (e.g. ar_SA) to the base translation directory. */
+    protected function embedLocale(string $locale): string
+    {
+        if (! preg_match('/^[a-zA-Z]{2,3}(?:[-_][a-zA-Z0-9]{2,8})*$/', $locale)) {
+            $locale = (string) config('app.locale', 'en');
+        }
+
+        return strtolower(preg_split('/[-_]/', $locale)[0]);
     }
 
     /**
