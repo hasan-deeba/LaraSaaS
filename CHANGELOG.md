@@ -2,6 +2,12 @@
 
 All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
+## 1.0.4 — 2026-10-21
+
+### Fixed
+
+- After a successful plan switch in embed mode, redirect with a `303` to a freshly rendered pricing page, preserve the selected billing interval, and show the success notice so the current-plan badge updates without a manual refresh.
+
 ## 1.0.1 — 2026-10-21
 
 ### Fixed
