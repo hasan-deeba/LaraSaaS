@@ -54,6 +54,9 @@ class EmbedController extends Controller
             'subscribe'    => collect($user ? $this->larasaas->planKeys() : [])
                 ->mapWithKeys(fn (string $key) => [$key => $this->embedLink($request, $user, 'billing.subscribe', ['plan' => $key])])
                 ->all(),
+            'preview'      => collect($user ? $this->larasaas->planKeys() : [])
+                ->mapWithKeys(fn (string $key) => [$key => $this->embedLink($request, $user, 'billing.preview', ['plan' => $key, 'interval' => $interval])])
+                ->all(),
         ]);
     }
 
@@ -83,17 +86,65 @@ class EmbedController extends Controller
         ]);
     }
 
+    /** Preview the prorated effect of a plan change before charging the user. */
+    public function previewSwap(Request $request, string $plan): Response
+    {
+        $targetPlan = $this->larasaas->plan($plan) ?? abort(404);
+        ['interval' => $interval] = validator($request->query(), [
+            'interval' => ['required', Rule::in(config('larasaas.pricing.intervals', ['monthly', 'yearly']))],
+        ])->validate();
+
+        $preview = $this->billing->previewSwap($request, $plan, $interval);
+        $pricing = $this->larasaas->pricingForUi();
+        $subscription = $this->larasaas->subscriptionForUi($request);
+        $currentPlan = $subscription['plan']
+            ? ($pricing['plans'][$subscription['plan']]['name'] ?? $subscription['plan'])
+            : __('larasaas::larasaas.billing.no_subscription');
+        $user = $request->user();
+
+        return response()->view('larasaas::embed.confirm-plan', [
+            'user' => $user,
+            'target_plan' => $targetPlan,
+            'current_plan' => $currentPlan,
+            'interval' => $interval,
+            'pricing' => $pricing,
+            'preview' => $preview,
+            'confirm_url' => $this->larasaas->embedUrl($user, 'billing.subscribe', [
+                'plan' => $plan,
+                'interval' => $interval,
+                'proration_date' => $preview['proration_date'],
+            ], $this->confirmationExpiry($request)),
+            'cancel_url' => $this->embedLink($request, $user, 'pricing', ['interval' => $interval]),
+            'nav' => [
+                'pricing' => $this->embedLink($request, $user, 'pricing', ['interval' => $interval]),
+                'billing' => $this->embedLink($request, $user, 'billing'),
+            ],
+        ]);
+    }
+
     /**
      * Subscribe / switch plan → Stripe Checkout opens in the top-level
-     * window (forms post with target="_top"); plan swaps stay in-frame.
+     * window (forms post with target="_top"); confirmed plan swaps stay in-frame.
      */
     public function subscribe(Request $request, string $plan): Response
     {
         $this->larasaas->plan($plan) ?? abort(404);
 
+        $signedInterval = $request->query('interval');
+        if ($signedInterval !== null) {
+            abort_unless(! $request->request->has('interval') || $request->input('interval') === $signedInterval, 403);
+            $request->merge(['interval' => $signedInterval]);
+        }
+
         ['interval' => $interval] = $request->validate([
             'interval' => ['required', Rule::in(config('larasaas.pricing.intervals', ['monthly', 'yearly']))],
         ]);
+
+        if ($request->query->has('proration_date')) {
+            $prorationDate = filter_var($request->query('proration_date'), FILTER_VALIDATE_INT);
+            abort_unless($prorationDate !== false && abs(now()->timestamp - $prorationDate) <= 600, 403);
+            $request->merge(['proration_date' => $prorationDate]);
+        }
 
         $returns = $this->returnUrls($request->user(), $interval);
         $request->merge([
@@ -167,6 +218,16 @@ class EmbedController extends Controller
         $expires = $request->query('expires');
 
         return is_numeric($expires) ? Carbon::createFromTimestamp((int) $expires) : null;
+    }
+
+    protected function confirmationExpiry(Request $request): \DateTimeInterface
+    {
+        $expiry = now()->addMinutes(10);
+        $incomingExpiry = $this->currentExpiry($request);
+
+        return $incomingExpiry !== null && $incomingExpiry < $expiry
+            ? $incomingExpiry
+            : $expiry;
     }
 
     /**

@@ -146,18 +146,69 @@ class PlansTest extends TestCase
             ->assertJsonPath('authenticated', true)->assertJsonPath('subscription.plan', 'starter');
     }
 
-    public function test_embed_plan_swap_redirects_back_to_pricing_with_a_fresh_view(): void
+    public function test_active_embed_subscribers_review_a_plan_change_before_confirming(): void
+    {
+        Plan::create($this->payload());
+        $user = $this->user();
+        $user->billingState = new Subscription(['stripe_price' => 'price_previous', 'stripe_status' => 'active']);
+
+        $this->actingAs($user)->get('/embed/pricing?interval=monthly')->assertOk()
+            ->assertSee('Switch plan')
+            ->assertSee('/embed/billing/swap/starter/preview');
+    }
+
+    public function test_embed_plan_change_displays_stripe_proration_preview_before_confirmation(): void
     {
         Plan::create($this->payload());
         $user = $this->user();
         $billing = $this->createMock(BillingActions::class);
         $billing->expects($this->once())
-            ->method('subscribe')
+            ->method('previewSwap')
             ->with($this->anything(), 'starter', 'monthly')
+            ->willReturn([
+                'amount_due_now' => 825,
+                'amount_due_now_formatted' => 'USD 8.25',
+                'estimated_credit' => 250,
+                'estimated_credit_formatted' => 'USD 2.50',
+                'currency' => 'USD',
+                'proration_date' => now()->timestamp,
+                'next_renewal_at' => now()->addMonth(),
+            ]);
+        app()->instance(BillingActions::class, $billing);
+
+        $url = app(LaraSaaS::class)->embedUrl($user, 'billing.preview', [
+            'plan' => 'starter',
+            'interval' => 'monthly',
+        ]);
+
+        $this->get($url)->assertOk()
+            ->assertSee('Review plan change')
+            ->assertSee('USD 8.25')
+            ->assertSee('Estimated account credit')
+            ->assertSee('USD 2.50')
+            ->assertSee('New recurring plan price')
+            ->assertSee('Stripe applies it to a future invoice')
+            ->assertSee('Confirm plan change')
+            ->assertSee('proration_date=');
+    }
+
+    public function test_embed_plan_swap_redirects_back_to_pricing_with_a_fresh_view(): void
+    {
+        Plan::create($this->payload());
+        $user = $this->user();
+        $billing = $this->createMock(BillingActions::class);
+        $prorationDate = now()->timestamp;
+        $billing->expects($this->once())
+            ->method('subscribe')
+            ->with($this->callback(fn ($request) => (int) $request->input('proration_date') === $prorationDate), 'starter', 'monthly')
             ->willReturn(['action' => 'swap', 'url' => null]);
         app()->instance(BillingActions::class, $billing);
 
-        $url = app(LaraSaaS::class)->embedUrl($user, 'billing.subscribe', ['plan' => 'starter']);
+        $url = app(LaraSaaS::class)->embedUrl($user, 'billing.subscribe', [
+            'plan' => 'starter',
+            'interval' => 'monthly',
+            'proration_date' => $prorationDate,
+        ], now()->addMinutes(5));
         $response = $this->post($url, ['interval' => 'monthly']);
 
         $response->assertStatus(303);

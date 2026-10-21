@@ -2,6 +2,12 @@
 
 All notable changes to `hasan-deeba/larasaas` will be documented in this file.
 
+## 1.0.5 — 2026-10-21
+
+### Added
+
+- Embedded subscribers now review a Stripe invoice preview before switching plans, including estimated amount due now, possible account credit, and the next renewal price/date. The confirmed change reuses the preview's signed proration timestamp.
+
 ## 1.0.4 — 2026-10-21
 
 ### Fixed

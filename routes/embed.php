@@ -20,6 +20,7 @@ use LaraSaaS\Http\Middleware\AuthenticatesEmbedUser;
 Route::get('/pricing', [EmbedController::class, 'pricing'])->middleware(AuthenticatesEmbedUser::class . ':optional')->name('pricing');
 Route::middleware(AuthenticatesEmbedUser::class)->group(function () {
 Route::get('/billing', [EmbedController::class, 'billing'])->name('billing');
+Route::get('/billing/swap/{plan}/preview', [EmbedController::class, 'previewSwap'])->name('billing.preview');
 
 Route::post('/billing/subscribe/{plan}', [EmbedController::class, 'subscribe'])->name('billing.subscribe');
 Route::post('/billing/cancel', [EmbedController::class, 'cancel'])->name('billing.cancel');
