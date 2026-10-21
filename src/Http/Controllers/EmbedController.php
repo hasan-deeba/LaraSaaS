@@ -115,7 +115,13 @@ class EmbedController extends Controller
             return redirect()->away($result['url']);
         }
 
-        return $this->backToBilling($request, 'swapped');
+        // A successful swap already updated Stripe and Cashier's local row.
+        // Return to pricing with a fresh GET so the Current plan badge updates
+        // immediately inside the iframe instead of leaving the user on billing.
+        return redirect()->to($this->embedLink($request, $request->user(), 'pricing', [
+            'notice' => 'swapped',
+            'interval' => $interval,
+        ]), 303);
     }
 
     public function cancel(Request $request): Response
