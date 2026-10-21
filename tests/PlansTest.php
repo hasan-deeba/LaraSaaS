@@ -8,6 +8,7 @@ use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Schema;
 use LaraSaaS\LaraSaaS;
 use LaraSaaS\Models\Plan;
+use LaraSaaS\Support\BillingActions;
 use Laravel\Cashier\Billable;
 use Laravel\Cashier\Subscription;
 
@@ -143,6 +144,27 @@ class PlansTest extends TestCase
         $user->billingState = new Subscription(['stripe_price' => 'price_starter_monthly', 'stripe_status' => 'active']);
         $this->actingAs($user)->getJson('/api/larasaas/pricing')->assertOk()
             ->assertJsonPath('authenticated', true)->assertJsonPath('subscription.plan', 'starter');
+    }
+
+    public function test_embed_plan_swap_redirects_back_to_pricing_with_a_fresh_view(): void
+    {
+        Plan::create($this->payload());
+        $user = $this->user();
+        $billing = $this->createMock(BillingActions::class);
+        $billing->expects($this->once())
+            ->method('subscribe')
+            ->with($this->anything(), 'starter', 'monthly')
+            ->willReturn(['action' => 'swap', 'url' => null]);
+        app()->instance(BillingActions::class, $billing);
+
+        $url = app(LaraSaaS::class)->embedUrl($user, 'billing.subscribe', ['plan' => 'starter']);
+        $response = $this->post($url, ['interval' => 'monthly']);
+
+        $response->assertStatus(303);
+        $location = $response->headers->get('Location');
+        $this->assertStringContainsString('/embed/pricing?', $location);
+        $this->assertStringContainsString('notice=swapped', $location);
+        $this->assertStringContainsString('interval=monthly', $location);
     }
 
     public function test_signed_embed_identity_is_optional_but_never_trusted_unsigned(): void
