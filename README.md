@@ -295,6 +295,7 @@ $billing = LaraSaaS::embedUrl($request->user(), 'billing'); // signed link, expi
 
 - Generate signed links **on your server** for the logged-in user, never from a user ID sent by the client.
 - Checkout and the Stripe portal open in the full window, not inside the frame.
+- Existing subscribers review a Stripe invoice preview before switching plans: the page shows the estimated amount due now and the new recurring plan price. The switch takes effect immediately; any downgrade credit is applied to future invoices, not refunded to the card.
 - Limit which sites may embed the pages:
 
 ```env

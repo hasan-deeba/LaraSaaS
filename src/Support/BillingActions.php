@@ -30,7 +30,8 @@ class BillingActions
         $name     = $this->larasaas->subscriptionName();
 
         if ($billable->subscribed($name)) {
-            $this->swap($request, $plan, $interval);
+            $prorationDate = $request->input('proration_date');
+            $this->swap($request, $plan, $interval, is_numeric($prorationDate) ? (int) $prorationDate : null);
 
             return ['action' => 'swap', 'url' => null];
         }
@@ -72,12 +73,91 @@ class BillingActions
     }
 
     /**
+     * Preview a plan swap using Stripe's upcoming invoice calculation. The
+     * same proration timestamp is signed into the confirmation URL and reused
+     * for the actual change so the displayed estimate closely matches billing.
+     *
+     * @return array{amount_due_now: int, amount_due_now_formatted: string, estimated_credit: int, estimated_credit_formatted: string, currency: string, proration_date: int, next_renewal_at: mixed}
+     */
+    public function previewSwap(Request $request, string $plan, string $interval): array
+    {
+        $planConfig = $this->larasaas->plan($plan) ?? abort(404);
+        $this->guardPrice($planConfig, $plan, $interval);
+
+        $billable = $this->larasaas->billable($request) ?? abort(403);
+        $subscription = $billable->subscription($this->larasaas->subscriptionName());
+        abort_unless($subscription && $billable->subscribed($this->larasaas->subscriptionName()), 403);
+
+        $item = $subscription->items->first();
+        abort_unless($item, 422, 'The current subscription has no billable price item to change.');
+
+        $prorationDate = now()->timestamp;
+        $targetPrice = $planConfig[$interval]['stripe_id'];
+        $priceItem = [
+            'id' => $item->stripe_id,
+            'price' => $targetPrice,
+        ];
+        $taxRates = $subscription->getPriceTaxRatesForPayload($targetPrice);
+        if ($taxRates) {
+            $priceItem['tax_rates'] = $taxRates;
+        }
+        if ($item->quantity !== null) {
+            $priceItem['quantity'] = (int) $item->quantity;
+        }
+
+        $subscriptionDetails = [
+            'items' => [$priceItem],
+            'cancel_at_period_end' => false,
+            'proration_behavior' => 'always_invoice',
+            'proration_date' => $prorationDate,
+        ];
+
+        if ($subscription->onTrial()
+            && $this->shouldEndTrialOnSwap($subscription->stripe_price, $planConfig, $interval)) {
+            $subscriptionDetails['trial_end'] = 'now';
+        }
+
+        $invoice = $billable->stripe()->invoices->createPreview([
+            'customer' => $billable->stripe_id,
+            'subscription' => $subscription->stripe_id,
+            'subscription_details' => $subscriptionDetails,
+        ]);
+
+        $currency = strtoupper((string) ($invoice->currency ?? config('larasaas.pricing.currency', 'usd')));
+        $amountDue = max(0, (int) ($invoice->amount_due ?? 0));
+        $credit = max(0, - (int) ($invoice->total ?? 0));
+        $nextRenewal = $subscription->currentPeriodEnd();
+
+        return [
+            'amount_due_now' => $amountDue,
+            'amount_due_now_formatted' => $this->formatMoney($amountDue, $currency),
+            'estimated_credit' => $credit,
+            'estimated_credit_formatted' => $this->formatMoney($credit, $currency),
+            'currency' => $currency,
+            'proration_date' => $prorationDate,
+            'next_renewal_at' => $nextRenewal,
+        ];
+    }
+
+    /** Format Stripe's minor-unit amount without requiring ext-intl. */
+    protected function formatMoney(int $amount, string $currency): string
+    {
+        if (extension_loaded('intl')) {
+            return \Laravel\Cashier\Cashier::formatAmount($amount, strtolower($currency));
+        }
+
+        $subunits = (new \Money\Currencies\ISOCurrencies())->subunitFor(new \Money\Currency($currency));
+
+        return $currency . ' ' . number_format($amount / (10 ** $subunits), $subunits, '.', ',');
+    }
+
+    /**
      * Swap between plans / intervals: immediately invoices and collects payment
      * (`always_invoice` + `error_if_incomplete`) so unpaid upgrades can never
      * activate, and ends any free trial when upgrading or switching to a
      * non-trial plan.
      */
-    public function swap(Request $request, string $plan, string $interval): void
+    public function swap(Request $request, string $plan, string $interval, ?int $prorationDate = null): void
     {
         $planConfig = $this->larasaas->plan($plan) ?? abort(404);
 
@@ -100,7 +180,8 @@ class BillingActions
         }
 
         try {
-            $subscription->errorIfPaymentFails()->swapAndInvoice($targetPrice);
+            $options = $prorationDate === null ? [] : ['proration_date' => $prorationDate];
+            $subscription->errorIfPaymentFails()->swapAndInvoice($targetPrice, $options);
         } catch (\Throwable $e) {
             if ($this->isSwapPaymentFailure($e)) {
                 abort(402, __('larasaas::larasaas.billing.payment_failed'));

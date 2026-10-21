@@ -74,21 +74,19 @@
                        href="{{ $pricing['contact_sales']['url'] }}" target="_blank" rel="noopener">
                         {{ $pricing['contact_sales']['label'] }}
                     </a>
+                @elseif ($user && ! empty($subscription['subscribed']))
+                    @if ($isCurrent || empty($priceId))
+                        <button type="button" class="ls-btn" disabled>{{ __('larasaas::larasaas.pricing.current_plan') }}</button>
+                    @else
+                        <a class="ls-btn" href="{{ $preview[$key] ?? '#' }}">{{ __('larasaas::larasaas.pricing.switch_plan') }}</a>
+                    @endif
                 @elseif ($user)
-                <form method="POST"
-                      action="{{ $subscribe[$key] ?? '#' }}"
-                      @if (empty($subscription['subscribed'])) target="_top" @endif>
-                    <input type="hidden" name="interval" value="{{ $interval }}">
-                    <button type="submit" class="ls-btn" {{ $isCurrent || empty($priceId) ? 'disabled' : '' }}>
-                        @if ($isCurrent)
-                            {{ __('larasaas::larasaas.pricing.current_plan') }}
-                        @elseif (! empty($subscription['subscribed']))
-                            {{ __('larasaas::larasaas.pricing.switch_plan') }}
-                        @else
+                    <form method="POST" action="{{ $subscribe[$key] ?? '#' }}" target="_top">
+                        <input type="hidden" name="interval" value="{{ $interval }}">
+                        <button type="submit" class="ls-btn" {{ empty($priceId) ? 'disabled' : '' }}>
                             {{ __('larasaas::larasaas.pricing.get_started') }}
-                        @endif
-                    </button>
-                </form>
+                        </button>
+                    </form>
                 @else
                     <a class="ls-btn" href="{{ config('larasaas.login_url', '/login') }}" target="_top">{{ __('larasaas::larasaas.pricing.sign_in') }}</a>
                 @endif

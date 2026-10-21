@@ -258,13 +258,13 @@ class EmbedSecurityTest extends TestCase
         try {
             $monthlyHtml = $this->get($manager->embedUrl($alice, 'pricing', ['interval' => 'monthly']))->assertOk()->getContent();
             $this->assertStringContainsString('Current plan', (string) $monthlyHtml);
-            $this->assertStringContainsString('<button type="submit" class="ls-btn" disabled>', (string) $monthlyHtml);
+            $this->assertStringContainsString('<button type="button" class="ls-btn" disabled>', (string) $monthlyHtml);
             $this->assertStringNotContainsString('14-day free trial', (string) $monthlyHtml);
             $this->assertStringNotContainsString('target="_top"', (string) $monthlyHtml);
 
             $yearlyHtml = $this->get($manager->embedUrl($alice, 'pricing', ['interval' => 'yearly']))->assertOk()->getContent();
             $this->assertStringContainsString('Switch plan', (string) $yearlyHtml);
-            $this->assertStringNotContainsString('<button type="submit" class="ls-btn" disabled>', (string) $yearlyHtml);
+            $this->assertStringNotContainsString('<button type="button" class="ls-btn" disabled>', (string) $yearlyHtml);
             $this->assertStringNotContainsString('14-day free trial', (string) $yearlyHtml);
         } finally {
             EmbedTestUser::$subscriptionsById = [];
