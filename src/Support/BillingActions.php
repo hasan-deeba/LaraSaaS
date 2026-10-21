@@ -234,15 +234,19 @@ class BillingActions
             return [];
         }
 
-        return collect($billable->invoices(true, ['limit' => 6]))
-            ->map(fn ($invoice) => [
-                'id'     => $invoice->id,
-                'date'   => $invoice->date()->toDateString(),
-                'total'  => $invoice->total(),
-                'status' => $invoice->status,
-                'pdf'    => $invoice->invoice_pdf,
-            ])
-            ->all();
+        try {
+            return collect($billable->invoices(true, ['limit' => 6]))
+                ->map(fn ($invoice) => [
+                    'id'     => $invoice->id,
+                    'date'   => $invoice->date()->toDateString(),
+                    'total'  => $invoice->total(),
+                    'status' => $invoice->status,
+                    'pdf'    => $invoice->invoice_pdf,
+                ])
+                ->all();
+        } catch (\Throwable) {
+            return [];
+        }
     }
 
     /**

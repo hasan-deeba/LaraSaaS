@@ -382,7 +382,19 @@ class FakeStripeClient extends \Stripe\StripeClient
             return $this->fakeSubscriptions;
         }
 
+        if ($name === 'invoices') {
+            return new FakeStripeInvoicesEndpoint;
+        }
+
         return parent::__get($name);
+    }
+}
+
+class FakeStripeInvoicesEndpoint
+{
+    public function all(array $params = []): object
+    {
+        return (object) ['data' => []];
     }
 }
 
