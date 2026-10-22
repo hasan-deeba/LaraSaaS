@@ -287,11 +287,7 @@ use LaraSaaS\Facades\LaraSaaS;
 
 $pricing = LaraSaaS::embedUrl();                            // public, no login needed
 $billing = LaraSaaS::embedUrl($request->user(), 'billing'); // signed link, expires in 60 min
-// Optional when generating links outside your locale middleware:
-$arabic = LaraSaaS::embedUrl($request->user(), 'pricing', ['locale' => 'ar']);
 ```
-
-Embed URLs carry the current app locale through iframe navigation and Stripe returns. Locale variants such as `ar_SA` are normalized to the available translation (`ar`).
 
 ```html
 <iframe src="{{ $billing }}" width="100%" height="720" style="border:0"></iframe>
