@@ -136,7 +136,6 @@ class LaraSaaSServiceProvider extends ServiceProvider
             ]);
 
             $embedMiddleware = array_merge($embedMiddleware, [
-                \LaraSaaS\Http\Middleware\SetEmbedLocale::class,
                 \LaraSaaS\Http\Middleware\EmbedFrameHeaders::class,
             ]);
 
