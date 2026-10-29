@@ -1,0 +1,16 @@
+# JS build artifacts
+node_modules/
+demo/.next/
+demo/.env
+
+# IDE
+.idea/
+
+# PHP dependencies and test cache
+/vendor/
+/composer.lock
+/.phpunit.cache/
+/.phpunit.result.cache
+
+# TypeScript incremental build cache
+*.tsbuildinfo

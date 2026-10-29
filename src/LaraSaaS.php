@@ -1,0 +1,592 @@
+<?php
+
+namespace LaraSaaS;
+
+use Illuminate\Contracts\Auth\Authenticatable;
+use Illuminate\Database\Eloquent\Model;
+use Illuminate\Http\Request;
+use Illuminate\Support\Facades\URL;
+use LaraSaaS\Models\Plan;
+use LaraSaaS\Support\PlanFeatures;
+use LaraSaaS\Support\PlanManager;
+use LaraSaaS\Support\WorkspaceManager;
+use Laravel\Cashier\Billable;
+use LogicException;
+
+/**
+ * The central LaraSaaS manager — resolves the host application's models,
+ * shapes database-backed plans/announcement typings for the React UI, and
+ * knows who the "billable" entity is.
+ */
+class LaraSaaS
+{
+    protected ?string $userModel = null;
+
+    /** Override the user model at runtime (useful in tests / multi-tenant apps). */
+    public function useUserModel(string $model): static
+    {
+        $this->userModel = $model;
+
+        return $this;
+    }
+
+    public function userModel(): string
+    {
+        return $this->userModel ?? config('larasaas.user_model', 'App\\Models\\User');
+    }
+
+    /** @return \Illuminate\Database\Eloquent\Builder */
+    public function usersQuery()
+    {
+        return $this->newUserModel()->newQuery();
+    }
+
+    public function newUserModel(): Model
+    {
+        $class = $this->userModel();
+
+        return new $class;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Billing
+    |--------------------------------------------------------------------------
+    */
+
+    public function subscriptionName(): string
+    {
+        return config('larasaas.billing.subscription', 'default');
+    }
+
+    /**
+     * Resolve the entity Cashier bills for this request — the authenticated
+     * user by default, or the resolved workspace when configured.
+     */
+    public function billable(Request $request): ?Model
+    {
+        $user = $request->user();
+
+        if (! $user) {
+            return null;
+        }
+
+        if (config('larasaas.billing.billable', 'user') === 'workspace') {
+            $resolver = config('larasaas.billing.workspace_resolver');
+
+            if (is_callable($resolver)) {
+                return $this->ensureBillable($resolver($user));
+            }
+
+            if (method_exists($user, 'currentWorkspace')) {
+                return $this->ensureBillable($user->currentWorkspace());
+            }
+
+            // Multi-tenant default: the workspace the user joined most recently.
+            if ($this->multiTenant()) {
+                return $this->ensureBillable($this->currentWorkspaceFor($user));
+            }
+        }
+
+        return $this->ensureBillable($user);
+    }
+
+    /** Cashier's billing methods come from a trait, not a model interface. */
+    protected function ensureBillable(?Model $model): ?Model
+    {
+        if ($model !== null && ! in_array(Billable::class, class_uses_recursive($model), true)) {
+            throw new LogicException(sprintf(
+                'LaraSaaS billing requires the [%s] model to use the Laravel\\Cashier\\Billable trait. '
+                . 'Add it to your user model, or to the workspace model when billing.billable is workspace. '
+                . 'See the README Cashier setup instructions.',
+                $model::class,
+            ));
+        }
+
+        return $model;
+    }
+
+    public function billableType(): string
+    {
+        if (config('larasaas.billing.billable') === 'workspace') {
+            return (string) (config('larasaas.billing.workspace_model') ?: $this->workspaceModel());
+        }
+
+        return $this->userModel();
+    }
+
+    /**
+     * Point Cashier at the SAME model LaraSaaS bills.
+     *
+     * Cashier resolves webhook customers through its own static customer model
+     * (`Cashier::findBillable()`), which defaults to a hardcoded
+     * `App\Models\User` — it never reads `larasaas.user_model`. Any host whose
+     * user model lives in another namespace (App\Models\AccessManagement\User,
+     * a domain folder, …) therefore got `class_parents(): Class App\Models\User
+     * does not exist` and a 500 on `customer.subscription.*` / `invoice.*`
+     * webhooks, while Checkout itself kept working.
+     *
+     * LaraSaaS owns this mapping: it is applied in the service provider's
+     * register() and boot(), so a host that still calls
+     * `Cashier::useCustomerModel(...)` in AppServiceProvider::boot() (which runs
+     * after every package provider) keeps the final say.
+     *
+     * @return bool true when Cashier was pointed at the LaraSaaS billable model
+     */
+    public function syncCashierCustomerModel(): bool
+    {
+        $class = $this->billableType();
+
+        if (! class_exists(\Laravel\Cashier\Cashier::class) || $class === '') {
+            return false;
+        }
+
+        \Laravel\Cashier\Cashier::useCustomerModel($class);
+
+        // Mirror it in the config repository too: Cashier 15/16 keeps no `model`
+        // key, but hosts and other packages look for one, and this survives
+        // `php artisan config:cache` for anything that reads it.
+        config(['cashier.model' => $class]);
+
+        return true;
+    }
+
+    /** The model Cashier currently resolves webhook customers with. */
+    public function cashierCustomerModel(): ?string
+    {
+        return class_exists(\Laravel\Cashier\Cashier::class)
+            ? (string) \Laravel\Cashier\Cashier::$customerModel
+            : null;
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Multi-tenant Workspaces & Team Management
+    |--------------------------------------------------------------------------
+    */
+
+    /** Is this project multi-tenant? Chosen by the host in config. */
+    public function multiTenant(): bool
+    {
+        return (bool) config('larasaas.multi_tenant.enabled');
+    }
+
+    public function workspaceModel(): string
+    {
+        return config('larasaas.multi_tenant.workspace_model')
+            ?: \LaraSaaS\Models\Workspace::class;
+    }
+
+    public function membershipModel(): string
+    {
+        return config('larasaas.multi_tenant.membership_model')
+            ?: \LaraSaaS\Models\WorkspaceMember::class;
+    }
+
+    public function invitationModel(): string
+    {
+        return config('larasaas.multi_tenant.invitation_model')
+            ?: \LaraSaaS\Models\WorkspaceInvitation::class;
+    }
+
+    /** Granular workspace-level roles and their implications (Owner > Admin > Member). */
+    public function roleDefinitions(): array
+    {
+        return config('larasaas.multi_tenant.roles', []);
+    }
+
+    /** Create a workspace; the owner immediately receives the Owner role. */
+    public function createWorkspace($owner, array $attributes = []): Model
+    {
+        return app(WorkspaceManager::class)->createWorkspace($owner, $attributes);
+    }
+
+    /** Every workspace the given user belongs to. */
+    public function workspacesFor($user): \Illuminate\Support\Collection
+    {
+        return app(WorkspaceManager::class)->workspacesFor($user);
+    }
+
+    /** The user's current workspace (most recently joined), if any. */
+    public function currentWorkspaceFor($user): ?Model
+    {
+        return app(WorkspaceManager::class)->currentWorkspaceFor($user);
+    }
+
+    public function workspaceMembers(Model $workspace): \Illuminate\Support\Collection
+    {
+        return app(WorkspaceManager::class)->members($workspace);
+    }
+
+    public function workspaceInvitations(Model $workspace): \Illuminate\Support\Collection
+    {
+        return app(WorkspaceManager::class)->invitations($workspace);
+    }
+
+    /** Invite an e-mail to the workspace with a granular role (Owner, Admin, Member). */
+    public function inviteMember(Model $workspace, $inviter, string $email, ?string $role = null): Model
+    {
+        return app(WorkspaceManager::class)->invite($workspace, $inviter, $email, $role);
+    }
+
+    /** Accept a pending invitation (pass the model or its token string). */
+    public function acceptInvitation($invitation, $user): Model
+    {
+        if (! $invitation instanceof Model) {
+            $invitation = app(WorkspaceManager::class)->invitationClass()::query()
+                ->where('token', (string) $invitation)
+                ->first();
+
+            if (! $invitation) {
+                throw \Illuminate\Validation\ValidationException::withMessages([
+                    'invitation' => 'This invitation link is invalid.',
+                ]);
+            }
+        }
+
+        return app(WorkspaceManager::class)->acceptInvitation($invitation, $user);
+    }
+
+    public function revokeInvitation(Model $workspace, $actor, Model $invitation): void
+    {
+        app(WorkspaceManager::class)->revokeInvitation($workspace, $actor, $invitation);
+    }
+
+    public function changeMemberRole(Model $workspace, $actor, $user, string $role): Model
+    {
+        return app(WorkspaceManager::class)->changeRole($workspace, $actor, $user, $role);
+    }
+
+    public function removeMember(Model $workspace, $actor, $user): void
+    {
+        app(WorkspaceManager::class)->removeMember($workspace, $actor, $user);
+    }
+
+    /** Does the user hold one of these workspace roles? */
+    public function hasWorkspaceRole(Model $workspace, $user, string|array $roles): bool
+    {
+        return app(WorkspaceManager::class)->hasRole($workspace, $user, $roles);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Pricing
+    |--------------------------------------------------------------------------
+    */
+
+    /** Host controllers must authorize the administrator before calling catalog writes. */
+    public function createPlan(array $attributes): Plan
+    {
+        return app(PlanManager::class)->create($attributes);
+    }
+
+    public function updatePlan(Plan $plan, array $attributes): Plan
+    {
+        return app(PlanManager::class)->update($plan, $attributes);
+    }
+
+    public function archivePlan(Plan $plan): Plan
+    {
+        return app(PlanManager::class)->archive($plan);
+    }
+
+    public function plans(): array
+    {
+        return Plan::query()->where('active', true)->orderBy('sort_order')->orderBy('id')->get()
+            ->mapWithKeys(fn (Plan $plan) => [$plan->key => $plan->forPricing()])->all();
+    }
+
+    public function plan(?string $key): ?array
+    {
+        return $key === null ? null : ($this->plans()[$key] ?? null);
+    }
+
+    public function planKeys(): array
+    {
+        return array_keys($this->plans());
+    }
+
+    /**
+     * Serialize the whole pricing matrix exactly how the React
+     * <PricingTable /> wants to consume it.
+     */
+    public function pricingForUi(): array
+    {
+        $pricing = config('larasaas.pricing', []);
+
+        return [
+            'currency'            => $pricing['default_currency'] ?? 'usd',
+            'currencies'          => $pricing['currencies'] ?? ['usd' => '$'],
+            'intervals'           => $pricing['intervals'] ?? ['monthly', 'yearly'],
+            'default_interval'    => $pricing['default_interval'] ?? 'monthly',
+            'yearly_savings_badge'=> $pricing['yearly_savings_badge'] ?? null,
+            'contact_sales'       => $pricing['contact_sales'] ?? null,
+            'trial_days'          => config('larasaas.billing.trial_days'),
+            'plans'               => $this->plans(),
+        ];
+    }
+
+    /**
+     * Current subscription state for the React billing page.
+     */
+    public function subscriptionForUi(Request $request): array
+    {
+        $billable = $this->billable($request);
+
+        if (! $billable) {
+            return ['subscribed' => false];
+        }
+
+        $name = $this->subscriptionName();
+        $subscription = $billable->subscription($name);
+
+        $onGrace = (bool) ($subscription?->onGracePeriod());
+
+        return [
+            'subscribed'       => $billable->subscribed($name),
+            'on_grace_period'  => $onGrace,
+            'on_trial'         => (bool) ($subscription?->onTrial()),
+            'ends_at'          => $subscription?->ends_at?->toDateString(),
+            'trial_ends_at'    => $subscription?->trial_ends_at?->toDateString(),
+            'stripe_status'    => $subscription?->stripe_status,
+            'current_price_id' => $subscription?->stripe_price,
+            'plan'             => $subscription ? $this->planKeyForPrice($subscription->stripe_price) : null,
+        ];
+    }
+
+    public function planKeyForPrice(?string $priceId): ?string
+    {
+        return $this->priceDetails($priceId)['key'] ?? null;
+    }
+
+    /**
+     * Resolve catalog plan metadata (including archived plans) for a Stripe price ID.
+     *
+     * @return array{key: string, interval: string, price: float|int|null, plan: array}|null
+     */
+    public function priceDetails(?string $priceId): ?array
+    {
+        if (! $priceId) {
+            return null;
+        }
+
+        // Archived plans still identify existing subscriptions and entitlements.
+        foreach (Plan::query()->get() as $record) {
+            $key = $record->key;
+            $plan = $record->forPricing();
+            foreach (['monthly', 'yearly'] as $interval) {
+                if (($plan[$interval]['stripe_id'] ?? null) === $priceId) {
+                    return [
+                        'key'      => $key,
+                        'interval' => $interval,
+                        'price'    => $plan[$interval]['price'] ?? null,
+                        'plan'     => $plan,
+                    ];
+                }
+            }
+        }
+
+        return null;
+    }
+
+    public function planFeatureDefinitions(): array
+    {
+        return app(PlanFeatures::class)->definitions();
+    }
+
+    /** Resolve a plan entitlement for the current billable subscription. */
+    public function entitlement(Request $request, string $feature): bool|int|float|null
+    {
+        $definition = $this->planFeatureDefinitions()[$feature] ?? null;
+        if ($definition === null) {
+            return null;
+        }
+        $denied = $definition['type'] === 'boolean' ? false : 0;
+        $billable = $this->billable($request);
+        if (! $billable || ! $billable->subscribed($this->subscriptionName())) {
+            return $denied;
+        }
+        $key = $this->planKeyForPrice($billable->subscription($this->subscriptionName())?->stripe_price);
+        $plan = $key ? Plan::query()->where('key', $key)->first() : null;
+
+        return $plan ? app(PlanFeatures::class)->values($plan->features ?? [])[$feature] : $denied;
+    }
+
+    /** Pass total usage AFTER the proposed operation; -1 means unlimited. */
+    public function allows(Request $request, string $feature, float $usage = 0): bool
+    {
+        $value = $this->entitlement($request, $feature);
+
+        if (is_bool($value)) {
+            return $value;
+        }
+
+        return $value !== null && is_finite($usage) && $usage >= 0
+            && ($value == -1 || ($value > 0 && $usage <= $value));
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Announcements
+    |--------------------------------------------------------------------------
+    */
+
+    public function announcementTypes(): array
+    {
+        return config('larasaas.announcements.types', []);
+    }
+
+    public function announcementType(string $type): array
+    {
+        return $this->announcementTypes()[$type] ?? ['color' => '#3b82f6', 'icon' => 'info'];
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Locale
+    |--------------------------------------------------------------------------
+    */
+
+    /**
+     * 'rtl' or 'ltr' for a locale (default: the host's current locale).
+     * Region variants match their language: ar_SA / ar-EG → ar.
+     */
+    public function textDirection(?string $locale = null): string
+    {
+        $language = strtolower(explode('-', str_replace('_', '-', $locale ?? app()->getLocale()))[0]);
+        $rtl = array_map('strtolower', (array) config('larasaas.rtl_locales', ['ar', 'he', 'fa', 'ur']));
+
+        return in_array($language, $rtl, true) ? 'rtl' : 'ltr';
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Integration mode
+    |--------------------------------------------------------------------------
+    */
+
+    /** The configured integration mode: inertia | api | embed | all | custom. */
+    public function integrationMode(): string
+    {
+        $mode = config('larasaas.integration.mode', 'inertia');
+
+        return in_array($mode, ['inertia', 'api', 'embed', 'all', 'custom'], true) ? $mode : 'inertia';
+    }
+
+    /** Laravel + React/Inertia in the same project (the published pages). */
+    public function servesInertia(): bool
+    {
+        return in_array($this->integrationMode(), ['inertia', 'all'], true);
+    }
+
+    /** JSON API for headless clients (separate SPA, Flutter, native…). */
+    public function servesApi(): bool
+    {
+        return $this->integrationMode() !== 'custom';
+    }
+
+    /** Standalone embeddable pages for <iframe> / mobile WebView. */
+    public function servesEmbed(): bool
+    {
+        return in_array($this->integrationMode(), ['embed', 'all'], true);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Embed surface (iframe / WebView)
+    |--------------------------------------------------------------------------
+    */
+
+    public function embedRouteName(string $page): string
+    {
+        return $this->routeName('embed.') . $page;
+    }
+
+    /**
+     * Public pricing: embedUrl() — no user or signature required.
+     * Private billing: embedUrl($user, 'billing') — signed and expiring.
+     * Embeds are customer-facing only; manage plans through createPlan/updatePlan.
+     */
+    public function embedUrl($user = null, string $page = 'pricing', array $params = [], \DateTimeInterface|int|null $minutes = null): string
+    {
+        if ($user === null) {
+            if ($page !== 'pricing') {
+                throw new LogicException('Only embed pricing can be viewed without a user.');
+            }
+
+            return route($this->embedRouteName('pricing'), array_diff_key($params, array_flip(['user', 'signature', 'expires', 'ph'])));
+        }
+
+        $expiration = $minutes instanceof \DateTimeInterface
+            ? $minutes
+            : now()->addMinutes(max(1, $minutes ?? (int) config('larasaas.integration.embed.token_ttl', 60)));
+
+        $query = array_merge($params, ['user' => $user->getAuthIdentifier()]);
+
+        if (($hash = $this->embedCredentialHash($user)) !== null) {
+            $query['ph'] = $hash;
+        }
+
+        return URL::temporarySignedRoute($this->embedRouteName($page), $expiration, $query);
+    }
+
+    /**
+     * Bind signed embed URLs to the user's current password hash when loaded so
+     * resetting/changing a password immediately revokes leaked embed links.
+     */
+    public function embedCredentialHash($user): ?string
+    {
+        $password = $user instanceof Model ? ($user->getAttributes()['password'] ?? null) : null;
+
+        if (! is_string($password) || $password === '') {
+            return null;
+        }
+
+        return substr(hash_hmac('sha256', $password, (string) config('app.key')), 0, 16);
+    }
+
+    /*
+    |--------------------------------------------------------------------------
+    | Admin / misc
+    |--------------------------------------------------------------------------
+    */
+
+    public function isAdmin(Authenticatable $user): bool
+    {
+        $emails = config('larasaas.admin_emails', []);
+
+        if (! empty($emails)) {
+            return in_array($user->email, $emails, true);
+        }
+
+        // Let the host's permission system grant access dynamically. Any role
+        // or permission package that integrates with Laravel's `can()` API can
+        // assign the `larasaas_admin` ability without editing .env.
+        if (method_exists($user, 'can') && $user->can('larasaas_admin')) {
+            return true;
+        }
+
+        // Backwards-compatible fallback for apps that use a boolean user field.
+        return (bool) ($user->larasaas_admin ?? false);
+    }
+
+    public function routeName(string $name): string
+    {
+        return config('larasaas.route.name_prefix', 'larasaas.') . $name;
+    }
+
+    public function apiBase(): string
+    {
+        return '/' . ltrim(config('larasaas.route.api_prefix', 'api/larasaas'), '/');
+    }
+
+    public function accentColor(): string
+    {
+        return config('larasaas.theme.accent', '#ff2d20');
+    }
+
+    public function page(string $name): string
+    {
+        return trim(config('larasaas.inertia.pages_dir', 'LaraSaaS'), '/') . '/' . $name;
+    }
+}

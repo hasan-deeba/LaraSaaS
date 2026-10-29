@@ -1,0 +1,16 @@
+# What consumers receive via Composer (see README "Repository layout"):
+#   composer.json, config/, src/, routes/, database/, resources/,
+#   README.md, CHANGELOG.md, LICENSE
+# Everything development-facing is stripped from dist archives.
+demo/             export-ignore
+.idea/            export-ignore
+.github/          export-ignore
+tests/            export-ignore
+package.json      export-ignore
+.gitattributes    export-ignore
+.gitignore        export-ignore
+phpunit.xml       export-ignore
+
+AGENTS.md         export-ignore
+tsconfig.package.json export-ignore
+package-lock.json export-ignore

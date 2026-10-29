@@ -1,0 +1,22 @@
+{
+  "name": "larasaas-dev",
+  "private": true,
+  "description": "Development harness for the LaraSaaS composer package. Only composer.json + src/, config/, resources/, routes/, database/ ship to Packagist \u2014 this file powers the demo/workspace site under demo/.",
+  "workspaces": [
+    "demo"
+  ],
+  "scripts": {
+    "dev": "next dev demo",
+    "build": "next build demo",
+    "start": "next start demo",
+    "lint": "npm run lint --workspace=demo",
+    "typecheck": "npm run typecheck --workspace=demo",
+    "typecheck:package": "tsc --project tsconfig.package.json --noEmit"
+  },
+  "devDependencies": {
+    "@inertiajs/react": "^2.0.0",
+    "@types/react": "^19.0.0",
+    "react": "^19.0.0",
+    "typescript": "^5.9.3"
+  }
+}
